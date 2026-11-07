@@ -418,6 +418,22 @@ router.get("/take-requests", async (req, res) => {
   res.json(byDateOrder(rows, "requestAt", req.query.sort));
 });
 
+// One submission on its own. The worker screens need the full record (the QR
+// expiry time, the received time) and not just the row of the list.
+// The photo of the student is never part of the answer.
+router.get("/give-requests/:id", async (req, res) => {
+  const request = await queryOne("SELECT * FROM give_requests WHERE id = $1", [req.params.id]);
+  if (!request) throw new ApiError(404, "Request not found.");
+  res.json(hidePhoto(request));
+});
+
+// One collection on its own.
+router.get("/take-requests/:id", async (req, res) => {
+  const request = await queryOne("SELECT * FROM take_requests WHERE id = $1", [req.params.id]);
+  if (!request) throw new ApiError(404, "Request not found.");
+  res.json(request);
+});
+
 router.get("/activity", async (req, res) => {
   let rows = await query("SELECT * FROM activity ORDER BY at DESC");
   rows = bySearch(rows, req.query.search, ["studentId", "bagNumber"]);
