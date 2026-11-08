@@ -110,10 +110,10 @@ export async function seed() {
   );
   await query(
     `INSERT INTO take_requests (id, student_id, student_name, bag_number, quantity, service, ironing,
-       code, seen, status, created_at, qr_expires_at, worker_id, confirmed_quantity, received_at)
+       code, seen, status, created_at, qr_expires_at, worker_id, scanned_at, student_verified_at, handed_over_at)
      VALUES ('take-seed-1', 'RU2026CS001', 'Aarav Sharma', 'B-001', 5, 'regular', false,
        'T-SEED01', true, 'COMPLETED', now() - interval '3 days', now() - interval '3 days' + interval '10 minutes',
-       'W-001', 5, now() - interval '3 days')`,
+       'W-001', now() - interval '3 days', now() - interval '3 days' + interval '1 minute', now() - interval '3 days')`,
   );
   await query(
     `INSERT INTO activity (action, actor_name, actor_role, student_id, student_name, bag_number,

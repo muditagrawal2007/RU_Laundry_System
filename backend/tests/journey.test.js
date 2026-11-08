@@ -65,6 +65,7 @@ test("the full give and take journey", async () => {
   });
   assert.equal(give.status, 201);
   const photoId = give.body.request.photoId;
+  const giveId = give.body.request.id;
 
   // 2. The worker scans the code. The bag has not moved yet.
   const scan = await call(worker, "POST", "/worker/qr/scan", { text: give.body.qrText });
@@ -108,9 +109,12 @@ test("the full give and take journey", async () => {
   assert.equal((await call(otherStudent, "GET", `/student/photos/${photoId}`)).status, 404);
   assert.equal((await call(worker, "GET", `/student/photos/${photoId}`)).status, 403);
 
-  // Both records are in the history.
+  // Both records of this journey are in the history (the demo data has an older
+  // collection for this student as well, so we look for the two we made).
   const history = await call(student, "GET", "/student/history");
-  assert.equal(history.body.length, 2);
+  const ids = history.body.map((row) => row.id);
+  assert.ok(ids.includes(giveId), "the submission is in the history");
+  assert.ok(ids.includes(takeId), "the collection is in the history");
 });
 
 test("a fake QR code is refused", async () => {
