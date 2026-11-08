@@ -177,6 +177,10 @@ The full table with the body of each call is in [`README.md`](README.md). The sh
 | GET | `/api/student/take-requests/:id` | – |
 | GET | `/api/student/take-requests/:id/qr` | – |
 | POST | `/api/student/take-requests/:id/verify` | – |
+| POST | `/api/student/give-requests/:id/cancel` | – |
+| POST | `/api/student/take-requests/:id/cancel` | – |
+| POST | `/api/student/acknowledge` | – |
+| GET | `/api/student/photos` | – |
 | GET | `/api/student/history` | `?search&type&dateFrom&dateTo&sort` |
 | GET | `/api/student/history/:type/:id` | – |
 | GET | `/api/student/transactions` | – |
@@ -204,6 +208,9 @@ The full table with the body of each call is in [`README.md`](README.md). The sh
 | GET | `/api/worker/take-requests` | `?search&outcome&dateFrom&dateTo&sort` |
 | GET | `/api/worker/activity` | `?search&action&dateFrom&dateTo` |
 | GET | `/api/worker/students` | `?q=` |
+| GET | `/api/worker/give-requests/:id` | – |
+| GET | `/api/worker/take-requests/:id` | – |
+| POST | `/api/worker/bags/:bagNumber/progress` | `{ progress }` |
 
 ### Admin (admin token)
 | Method | Path | Body |
@@ -214,6 +221,10 @@ The full table with the body of each call is in [`README.md`](README.md). The sh
 | POST | `/api/admin/counter/auto` | – |
 | GET | `/api/admin/counter/settings` | – |
 | PUT | `/api/admin/counter/schedule` | `[{ day, isOpen, openTime, closeTime }]` |
+| POST | `/api/admin/counter/auto` | – |
+| DELETE | `/api/admin/counter/closures/:id` | – |
+| GET | `/api/admin/settings` | – |
+| PUT | `/api/admin/settings` | `{ urgentEnabled }` |
 | POST | `/api/admin/counter/closures` | `{ type, date, startTime?, endTime?, reason }` |
 | DELETE | `/api/admin/counter/closures/:id` | – |
 | GET | `/api/admin/bags` | `?search&status&dateFrom&dateTo&sort` |
@@ -236,7 +247,7 @@ The full table with the body of each call is in [`README.md`](README.md). The sh
 | GET | `/api/admin/reports/export.csv` | – |
 | POST | `/api/admin/reset-demo` | – (answers 403 unless the server sets `ALLOW_DEMO_RESET=true`) |
 
-## 7. The QR codes
+## 7. The QR codes and the short code
 
 The server makes the QR text, not the frontend. When the student creates a request, the answer
 already contains it:
@@ -253,6 +264,13 @@ So the frontend draws `qrText` as a QR code and shows `qrExpiresAt` as the count
 sends the scanned text to `POST /api/worker/qr/scan`.
 
 The text is signed by the server with a secret that never leaves it, so a fake code is refused.
+
+Every request also has a **short code**, like `G-4KP7XZ` (G for a submission, T for a
+collection). The student shows it under the QR code and the worker types it in.
+`POST /api/worker/qr/scan` accepts either the short code or the whole signed text.
+
+`GET /api/student/photos` gives all the reference photos of the student at once, keyed by
+the id of the submission they belong to.
 
 ## 8. The polling
 

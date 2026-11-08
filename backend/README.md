@@ -109,15 +109,23 @@ Every function in the frontend's `api.ts` already names its endpoint. They all e
 | `getComplaintEvidence` (student screen) | `GET /api/student/complaints/:ref/evidence` → `{ dataUrl }` |
 | `getStudentNotifications` / `markNotificationRead` | `GET /api/student/notifications`, `POST /api/student/notifications/:id/read` |
 | `getStudentProfile` | `GET /api/student/profile` |
+| `cancelRequest` | `POST /api/student/give-requests/:id/cancel`, `POST /api/student/take-requests/:id/cancel` |
+| `acknowledgeResults` | `POST /api/student/acknowledge` |
+| `loadStudentPhotos` | `GET /api/student/photos` → `{ "<submission id>": "data:..." }` |
 | `getWorkerDashboard` | `GET /api/worker/dashboard` |
 | `scanQrCode` | `POST /api/worker/qr/scan` with `{ text }` |
 | `verifyGiveRequest` / `returnBagToCounter` | `POST /api/worker/give-requests/:id/verify`, `POST .../:id/return-to-counter` |
 | `scanTakeRequest` / `confirmHandover` | `POST /api/worker/take-requests/:id/scan`, `POST .../:id/handover` |
 | `manualHandover` / `correctStatus` | `POST /api/worker/manual-handover`, `POST /api/worker/status-corrections` |
 | `getWorkerGiveRequests` / `getWorkerTakeRequests` / `getWorkerActivity` / `searchStudents` | `GET /api/worker/give-requests`, `/take-requests`, `/activity`, `/students?q=` |
+| `getWorkerGiveRequest` / `getWorkerTakeRequest` | `GET /api/worker/give-requests/:id`, `GET /api/worker/take-requests/:id` |
+| `setProgress` | `POST /api/worker/bags/:bagNumber/progress` with `{ progress }` |
 | `getAdminDashboard` | `GET /api/admin/dashboard` |
 | `openCounter` / `closeCounter` | `POST /api/admin/counter/open`, `POST /api/admin/counter/close` |
 | `getCounterSettings` / `saveCounterSchedule` / `addClosure` | `GET /api/admin/counter/settings`, `PUT /api/admin/counter/schedule`, `POST /api/admin/counter/closures` |
+| `setCounterToSchedule` | `POST /api/admin/counter/auto` |
+| `removeClosure` | `DELETE /api/admin/counter/closures/:id` |
+| `getUrgentService` / `setUrgentService` | `GET /api/admin/settings`, `PUT /api/admin/settings` with `{ urgentEnabled }` |
 | `getBags` / `getBagDetail` | `GET /api/admin/bags`, `GET /api/admin/bags/:bagNumber` |
 | `getAssignments` / `getAvailableBags` / `assignBag` | `GET /api/admin/assignments`, `GET /api/admin/available-bags`, `POST /api/admin/assignments` |
 | `getAllHistory` / `getAdminHistoryDetail` | `GET /api/admin/history?tab=give\|take\|activity`, `GET /api/admin/history/:type/:id` |
