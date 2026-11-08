@@ -32,7 +32,7 @@ import { ApiError } from "../errors.js";
 import { getCounterInfo } from "../counter.js";
 import { findBagOfStudent } from "../bags.js";
 import { logActivity } from "../activity.js";
-import { qrAnswer } from "../qr.js";
+import { qrAnswer, newShortCode } from "../qr.js";
 import { savePhoto } from "../photos.js";
 import { giveRows, takeRows } from "../history.js";
 import { addUpdates, findComplaint, CATEGORY_LABELS } from "../complaints.js";
@@ -44,6 +44,18 @@ const router = express.Router();
 
 // Every route below is for students only.
 router.use(requireRole("STUDENT"));
+
+/** The service the student picked. "ironing" means ironing only, no washing. */
+function readService(service, ironing) {
+  if (service === "urgent" || service === "ironing") return service;
+  return "regular";
+}
+
+/** Is the one-day urgent service switched on? */
+async function urgentIsOn() {
+  const settings = await queryOne("SELECT urgent_enabled FROM settings WHERE id = 1");
+  return settings ? settings.urgentEnabled : true;
+}
 
 /* ------------------------------------------------------------------------ */
 /* Dashboard                                                                 */
@@ -116,11 +128,29 @@ router.post("/give-requests", async (req, res) => {
   let photoId = null;
   if (photoDataUrl) photoId = await savePhoto(student.id, "REFERENCE", photoDataUrl);
 
+  // Which service the student picked.
+  const service = readService(req.body.service, req.body.ironing);
+  if (service === "urgent" && !(await urgentIsOn())) {
+    throw new ApiError(409, "The one-day urgent service is switched off right now.");
+  }
+
   const request = await queryOne(
-    `INSERT INTO give_requests (id, student_id, student_name, bag_number, quantity, photo_id, qr_expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO give_requests (id, student_id, student_name, bag_number, quantity, photo_id,
+       service, ironing, code, qr_expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING *`,
-    [makeId("give"), student.id, student.name, bag.bagNumber, quantity, photoId, minutesFromNow(GIVE_QR_MINUTES)],
+    [
+      makeId("give"),
+      student.id,
+      student.name,
+      bag.bagNumber,
+      quantity,
+      photoId,
+      service,
+      Boolean(req.body.ironing),
+      newShortCode("G"),
+      minutesFromNow(GIVE_QR_MINUTES),
+    ],
   );
 
   await logActivity({
@@ -223,10 +253,22 @@ router.post("/take-requests", async (req, res) => {
   if (existing) throw new ApiError(409, "You already have an open collection request.");
 
   const request = await queryOne(
-    `INSERT INTO take_requests (id, student_id, student_name, bag_number, quantity, qr_expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO take_requests (id, student_id, student_name, bag_number, quantity,
+       service, ironing, code, give_request_id, qr_expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING *`,
-    [makeId("take"), student.id, student.name, bag.bagNumber, bag.quantity, minutesFromNow(TAKE_QR_MINUTES)],
+    [
+      makeId("take"),
+      student.id,
+      student.name,
+      bag.bagNumber,
+      bag.quantity,
+      bag.service || "regular",
+      Boolean(bag.ironing),
+      newShortCode("T"),
+      req.body.giveRequestId || null,
+      minutesFromNow(TAKE_QR_MINUTES),
+    ],
   );
 
   await logActivity({
@@ -262,6 +304,88 @@ router.get("/take-requests/:id/qr", async (req, res) => {
   if (!request) throw new ApiError(404, "Request not found.");
   if (request.status !== "PENDING") throw new ApiError(409, "This request is no longer waiting.");
   res.json(qrAnswer("take", request));
+});
+
+// The student cancels a request that nobody has looked at yet.
+// Once the worker has scanned the code it is too late to cancel.
+router.post("/take-requests/:id/cancel", async (req, res) => {
+  const student = req.user;
+  const request = await queryOne(
+    "SELECT * FROM take_requests WHERE id = $1 AND student_id = $2",
+    [req.params.id, student.id],
+  );
+  if (!request) throw new ApiError(404, "Request not found.");
+  if (request.status !== "PENDING") {
+    throw new ApiError(409, "This request can no longer be cancelled.");
+  }
+
+  const updated = await queryOne(
+    "UPDATE take_requests SET status = 'CANCELLED', seen = true WHERE id = $1 RETURNING *",
+    [request.id],
+  );
+
+  await logActivity({
+    action: "Request cancelled by the student",
+    actorName: student.name,
+    actorRole: "STUDENT",
+    studentId: student.id,
+    studentName: student.name,
+    bagNumber: request.bagNumber,
+    result: "Cancelled",
+    kind: "TAKE",
+    refType: "take",
+    refId: request.id,
+  });
+
+  res.json(updated);
+});
+
+router.post("/give-requests/:id/cancel", async (req, res) => {
+  const student = req.user;
+  const request = await queryOne(
+    "SELECT * FROM give_requests WHERE id = $1 AND student_id = $2",
+    [req.params.id, student.id],
+  );
+  if (!request) throw new ApiError(404, "Request not found.");
+  if (request.status !== "PENDING") {
+    throw new ApiError(409, "This request can no longer be cancelled.");
+  }
+
+  const updated = await queryOne(
+    "UPDATE give_requests SET status = 'CANCELLED', seen = true WHERE id = $1 RETURNING *",
+    [request.id],
+  );
+
+  await logActivity({
+    action: "Request cancelled by the student",
+    actorName: student.name,
+    actorRole: "STUDENT",
+    studentId: student.id,
+    studentName: student.name,
+    bagNumber: request.bagNumber,
+    result: "Cancelled",
+    kind: "GIVE",
+    refType: "give",
+    refId: request.id,
+  });
+
+  res.json(updated);
+});
+
+// The student has seen the results of their finished requests.
+router.post("/acknowledge", async (req, res) => {
+  const student = req.user;
+  await query(
+    `UPDATE give_requests SET seen = true
+     WHERE student_id = $1 AND status <> 'PENDING' AND seen = false`,
+    [student.id],
+  );
+  await query(
+    `UPDATE take_requests SET seen = true
+     WHERE student_id = $1 AND status NOT IN ('PENDING', 'SCANNED', 'VERIFIED') AND seen = false`,
+    [student.id],
+  );
+  res.json({ ok: true });
 });
 
 // The student checks the bag details and confirms.
@@ -447,6 +571,21 @@ router.get("/notifications", async (req, res) => {
     [req.user.id],
   );
   res.json(rows);
+});
+
+// All the reference photos of the student, one request for all of them.
+// The answer is keyed by the id of the submission the photo belongs to.
+router.get("/photos", async (req, res) => {
+  const photos = await query(
+    `SELECT give_requests.id AS request_id, photos.data_url
+     FROM give_requests
+     JOIN photos ON photos.id = give_requests.photo_id
+     WHERE give_requests.student_id = $1`,
+    [req.user.id],
+  );
+  const result = {};
+  for (const photo of photos) result[photo.requestId] = photo.dataUrl;
+  res.json(result);
 });
 
 router.post("/notifications/:id/read", async (req, res) => {

@@ -160,6 +160,33 @@ router.get("/counter/settings", async (req, res) => {
   res.json(await getCounter());
 });
 
+// Is the one-day urgent service switched on?
+router.get("/settings", async (req, res) => {
+  const settings = await queryOne("SELECT urgent_enabled FROM settings WHERE id = 1");
+  res.json({ urgentEnabled: settings ? settings.urgentEnabled : true });
+});
+
+// Switch the one-day urgent service on or off.
+router.put("/settings", async (req, res) => {
+  const urgentEnabled = Boolean(req.body.urgentEnabled);
+  await query(
+    `INSERT INTO settings (id, urgent_enabled) VALUES (1, $1)
+     ON CONFLICT (id) DO UPDATE SET urgent_enabled = $1`,
+    [urgentEnabled],
+  );
+  await logActivity({
+    action: "One-Day Urgent service turned " + (urgentEnabled ? "on" : "off"),
+    actorName: req.user.name,
+    actorRole: "ADMIN",
+    studentId: "-",
+    studentName: "-",
+    bagNumber: "-",
+    result: urgentEnabled ? "ON" : "OFF",
+    kind: "COUNTER",
+  });
+  res.json({ urgentEnabled });
+});
+
 router.put("/counter/schedule", async (req, res) => {
   const schedule = req.body;
   if (!Array.isArray(schedule)) throw new ApiError(400, "Send the list of days.");

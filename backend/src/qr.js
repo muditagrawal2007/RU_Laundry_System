@@ -55,3 +55,18 @@ export function qrAnswer(kind, request) {
     qrExpiresAt: request.qrExpiresAt,
   };
 }
+
+/**
+ * Makes the short code the student shows and the worker types in.
+ *
+ * It looks like "G-4KP7XZ". The letters that look like numbers (0, 1, I, O) are left
+ * out, so the code is easy to read out loud and hard to guess.
+ */
+export function newShortCode(prefix) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i += 1) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `${prefix}-${code}`;
+}

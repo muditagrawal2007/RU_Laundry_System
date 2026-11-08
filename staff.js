@@ -201,59 +201,46 @@ function onWorkerDashClick(e) {
 }
  
 // moves a bag to its next step (Washing -> Ironing -> returned to the counter)
-function advanceProgress(bagNumber) {
-  db = loadData();
+async function advanceProgress(bagNumber) {
+  db = await loadData();
   const w = currentUser();
   const bag = db.bags.find(function (b) { return b.number === bagNumber; });
   if (!bag || bag.status !== BAG_IN_PROCESS) { showToast("This bag is not in process.", true); renderCurrent(); return; }
   const stages = processStages(bag);
   const i = Math.max(0, stages.indexOf(bag.progress));
-  const now = nowIso();
- 
-  if (i < stages.length - 1) {
-    bag.progress = stages[i + 1];
-    notifyStudent(bag.studentId, "Your laundry update: " + bag.progress + ".");
-    logActivity("Progress: " + bag.progress, bag.studentId, bag.number, w.id);
-    showToast(bag.number + ": " + bag.progress);
-  } else {
-    bag.status = BAG_AT_COUNTER;
-    bag.progress = null;
-    bag.returnedAt = now;
-    bag.returnedBy = w.id;
-    notifyStudent(bag.studentId, "Your clothes are ready for collection.");
-    logActivity("Bag returned to counter", bag.studentId, bag.number, w.id);
-    showToast(bag.number + " is now at the counter.");
+
+  try {
+    if (i < stages.length - 1) {
+      const next = stages[i + 1];
+      await api.setProgress(w.id, bagNumber, next);
+      showToast(bag.number + ": " + next);
+    } else {
+      await api.returnToCounter(w.id, bagNumber);
+      showToast(bag.number + " is now at the counter.");
+    }
+    db = await loadData();
+    renderCurrent();
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The bag could not be moved on.", true);
+    renderCurrent();
   }
-  bag.updatedBy = w.id;
-  bag.updatedAt = now;
-  saveData(db);
-  renderCurrent();
 }
- 
+
 // "scan" a QR code by typing its code
-function openCode() {
-  db = loadData();
-  expireTransactions();
+async function openCode() {
   const w = currentUser();
   const code = normalizeCode($("scanCode").value);
   if (!code) { scanMsg = "Enter the code shown under the student's QR code."; renderWorkerDashboard(); return; }
   scanMsg = "";
- 
-  const t = db.transactions.find(function (x) { return x.code === code; });
-  if (!t) {
+
+  try {
+    const found = await api.scanCode(code);
+    workerTxnId = found.request.id;
+    // Scanning a collection QR starts the verification session.
+    if (found.kind === "take") await api.scanTakeRequest(w.id, found.request.id);
+  } catch (err) {
     workerTxnId = "INVALID";
-  } else {
-    workerTxnId = t.id;
-    if (t.type === "take" && t.status === "qr_generated") {   // scanning a collection QR starts the verification session
-      const now = new Date();
-      t.status = "scanned";
-      t.scannedAt = now.toISOString();
-      t.verifyExpiresAt = new Date(now.getTime() + VERIFY_MINUTES * 60000).toISOString();
-      t.workerId = w.id;
-      addEvent(t, "QR scanned by worker", w.id);
-      logActivity("Collection QR scanned", t.studentId, t.bag, w.id);
-      saveData(db);
-    }
+    scanMsg = err && err.message ? err.message : "This code cannot be used.";
   }
   sessionStorage.setItem("ruWorkerTxn", workerTxnId);
   showPage("w-verify");
@@ -334,58 +321,42 @@ function onVerifyClick(e) {
   }
 }
  
-function completeGive(id) {
-  db = loadData();
-  expireTransactions();
+async function completeGive(id) {
   const w = currentUser();
+  db = await loadData();
   const t = db.transactions.find(function (x) { return x.id === id; });
   if (!t || t.type !== "give" || t.status !== "qr_generated") { showToast("This QR code can no longer be used.", true); renderCurrent(); return; }
   const bag = db.bags.find(function (b) { return b.number === t.bag; });
   if (!bag || bag.status !== BAG_NOT_GIVEN) { showToast("This bag is not marked as 'Bag not given'.", true); renderCurrent(); return; }
- 
-  const nowMs = Date.now();
-  const now = new Date(nowMs).toISOString();
-  t.status = "completed"; t.completedAt = now; t.workerId = w.id; t.confirmedQuantity = t.quantity; t.seen = false;
-  addEvent(t, "Worker verified the bag", w.id);
-  addEvent(t, "Bag received by worker", w.id);
- 
-  bag.status = BAG_IN_PROCESS;
-  bag.quantity = t.quantity; bag.service = t.service; bag.ironing = t.ironing;
-  bag.progress = processStages(t)[0];
-  bag.receivedAt = now; bag.returnedAt = null; bag.collectedAt = null;
-  bag.dueAt = new Date(nowMs + daysFor(t.service) * 86400000).toISOString();   // 3 days regular, 1 day urgent / ironing
-  bag.receivedBy = w.id; bag.returnedBy = null; bag.updatedBy = w.id; bag.updatedAt = now;
- 
-  notifyStudent(t.studentId, "Your bag has been received by the laundry worker. Expected ready by " + fmt(bag.dueAt) + ".");
-  logActivity("Bag received by worker", t.studentId, t.bag, w.id);
-  justCompletedId = t.id;
-  saveData(db);
-  renderCurrent();
-  showToast("Bag " + t.bag + " received.");
+
+  try {
+    await api.verifyGiveRequest(w.id, id, t.quantity);
+    justCompletedId = t.id;
+    db = await loadData();
+    renderCurrent();
+    showToast("Bag " + t.bag + " received.");
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The bag could not be confirmed.", true);
+    renderCurrent();
+  }
 }
- 
-function completeTake(id) {
-  db = loadData();
-  expireTransactions();
+
+async function completeTake(id) {
   const w = currentUser();
+  db = await loadData();
   const t = db.transactions.find(function (x) { return x.id === id; });
   if (!t || t.type !== "take" || t.status !== "student_verified") { showToast("This collection can no longer be completed.", true); renderCurrent(); return; }
-  const bag = db.bags.find(function (b) { return b.number === t.bag; });
- 
-  const now = nowIso();
-  t.status = "completed"; t.completedAt = now; t.handoverBy = w.id; t.workerId = t.workerId || w.id; t.seen = false;
-  addEvent(t, "Physical handover confirmed", w.id);
- 
-  if (bag) {
-    bag.status = BAG_NOT_GIVEN; bag.collectedAt = now; bag.quantity = null; bag.service = null; bag.ironing = false;
-    bag.progress = null; bag.dueAt = null; bag.updatedBy = w.id; bag.updatedAt = now;
+
+  try {
+    await api.confirmHandover(w.id, id);
+    justCompletedId = t.id;
+    db = await loadData();
+    renderCurrent();
+    showToast("Handover completed.");
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The handover could not be confirmed.", true);
+    renderCurrent();
   }
-  notifyStudent(t.studentId, "Your clothes have been collected successfully.");
-  logActivity("Physical handover confirmed", t.studentId, t.bag, w.id);
-  justCompletedId = t.id;
-  saveData(db);
-  renderCurrent();
-  showToast("Handover completed.");
 }
  
 // ======================================================
@@ -584,29 +555,33 @@ function toggleCounter() {
   const opts = opening
     ? { title: "Open the counter?", text: "Open the laundry counter now? Students will be able to start permitted laundry requests and collections.", yes: "Confirm Open" }
     : { title: "Close the counter?", text: "Close the laundry counter now? Students will no longer be able to start new Give Clothes or Take Clothes requests.", yes: "Confirm Close" };
-  askConfirm(opts, function () {
-    db = loadData();
-    db.counterOpen = opening;
-    logActivity(opening ? "Counter opened" : "Counter closed", "", "", currentUser().id);
-    db.students.forEach(function (s) { notifyStudent(s.id, opening ? "The laundry counter is now open." : "The laundry counter is now closed."); });
-    saveData(db);
-    renderCurrent();
-    showToast("Laundry counter is now " + (opening ? "OPEN." : "CLOSED."));
+  askConfirm(opts, async function () {
+    const a = currentUser();
+    try {
+      await api.setCounterOpen(a.id, opening);
+      db = await loadData();
+      renderCurrent();
+      showToast("Laundry counter is now " + (opening ? "OPEN." : "CLOSED."));
+    } catch (err) {
+      showToast(err && err.message ? err.message : "The counter could not be changed.", true);
+    }
   });
 }
- 
+
 function toggleUrgent() {
   const turnOn = !urgentOn();
   askConfirm({ title: turnOn ? "Turn on urgent service?" : "Turn off urgent service?",
     text: turnOn ? "Students will be able to book One-Day Urgent Laundry again." : "Students will not be able to book One-Day Urgent Laundry. Bags already received are not affected.",
-    yes: turnOn ? "Turn on" : "Turn off" }, function () {
-    db = loadData();
-    db.settings = db.settings || {};
-    db.settings.urgentEnabled = turnOn;
-    logActivity("One-Day Urgent service turned " + (turnOn ? "on" : "off"), "", "", currentUser().id);
-    saveData(db);
-    renderCurrent();
-    showToast("One-Day Urgent service is " + (turnOn ? "ON." : "OFF."));
+    yes: turnOn ? "Turn on" : "Turn off" }, async function () {
+    const a = currentUser();
+    try {
+      await api.setUrgentService(a.id, turnOn);
+      db = await loadData();
+      renderCurrent();
+      showToast("One-Day Urgent service is " + (turnOn ? "ON." : "OFF."));
+    } catch (err) {
+      showToast(err && err.message ? err.message : "The service could not be changed.", true);
+    }
   });
 }
  
@@ -700,12 +675,15 @@ function addStudent() {
   const bag = db.bags.find(function (b) { return b.number === bagNo; });
   if (!bag || bag.studentId) { studentMsg = "That bag is already assigned. Choose another bag."; renderAdminStudents(); return; }
  
-  db.students.push({ id: id, name: name, password: pass, bag: bag.number });
-  bag.studentId = id;
-  logActivity("Bag " + bag.number + " assigned to " + name, id, bag.number, currentUser().id);
-  saveData(db);
-  studentMsg = "Student added and bag " + bag.number + " assigned.";
-  renderCurrent();
+  const a = currentUser();
+  api.addStudent(a.id, id, name, pass, bag.number).then(async function () {
+    db = await loadData();
+    studentMsg = "Student added and bag " + bag.number + " assigned.";
+    renderCurrent();
+  }).catch(function (err) {
+    studentMsg = err && err.message ? err.message : "The student could not be added.";
+    renderAdminStudents();
+  });
 }
  
 // ======================================================
@@ -810,22 +788,16 @@ function saveComplaint(id) {
   }
 }
  
-function doSaveComplaint(id, status, text) {
-  db = loadData();
+async function doSaveComplaint(id, status, text) {
   const a = currentUser();
-  const c = db.complaints.find(function (x) { return x.id === id; });
-  if (!c) return;
-  const now = nowIso();
-  c.updates.push({ time: now, by: a.id, text: text, status: status });
-  c.status = status;
-  c.updatedAt = now;
-  c.handledBy = a.id;
-  if (status === "Resolved") { c.resolvedAt = now; c.resolvedBy = a.id; }
-  else { delete c.resolvedAt; delete c.resolvedBy; }
-  notifyStudent(c.studentId, status === "Resolved" ? "Your complaint " + c.id + " has been resolved." : "Your complaint " + c.id + " has been updated.");
-  logActivity("Complaint " + c.id + " " + (status === "Resolved" ? "resolved" : "updated (" + status + ")"), c.studentId, c.bag, a.id);
-  saveData(db);
-  renderCurrent();
-  showToast("Complaint " + id + " saved.");
+  try {
+    await api.updateComplaint(a.id, id, status, text);
+    db = await loadData();
+    renderCurrent();
+    showToast("Complaint " + id + " saved.");
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The complaint could not be saved.", true);
+    renderCurrent();
+  }
 }
  

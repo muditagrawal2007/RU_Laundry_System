@@ -75,14 +75,45 @@ export async function seed() {
     "INSERT INTO counter_state (id, manual_state, opened_at, updated_by) VALUES (1, 'OPEN', now(), 'Dr. Priya Menon')",
   );
 
+  // The one-day urgent service is switched on.
+  await query("INSERT INTO settings (id, urgent_enabled) VALUES (1, true)");
+
   // Ananya's bag is being washed, Ishaan's bag is waiting at the counter.
   await query(
-    `UPDATE bags SET status = 'IN_PROCESS', quantity = 6, received_at = now() - interval '5 hours',
+    `UPDATE bags SET status = 'IN_PROCESS', quantity = 6, service = 'regular', ironing = true,
+       progress = 'Washing in Progress', due_at = now() + interval '3 days',
+       received_at = now() - interval '5 hours', received_by = 'W-001',
        updated_by = 'Ramesh Yadav' WHERE bag_number = 'B-002'`,
   );
   await query(
-    `UPDATE bags SET status = 'AT_COUNTER', quantity = 4, received_at = now() - interval '26 hours',
-       returned_at = now() - interval '30 minutes', updated_by = 'Ramesh Yadav' WHERE bag_number = 'B-003'`,
+    `UPDATE bags SET status = 'AT_COUNTER', quantity = 4, service = 'urgent',
+       due_at = now() - interval '6 hours',
+       received_at = now() - interval '26 hours', returned_at = now() - interval '30 minutes',
+       received_by = 'W-002', returned_by = 'W-002',
+       updated_by = 'Ramesh Yadav' WHERE bag_number = 'B-003'`,
+  );
+
+  // The submissions that go with the bags above.
+  await query(
+    `INSERT INTO give_requests (id, student_id, student_name, bag_number, quantity, service, ironing,
+       code, seen, status, created_at, qr_expires_at, worker_id, confirmed_quantity, received_at)
+     VALUES ('give-seed-1', 'RU2026CS002', 'Ananya Verma', 'B-002', 6, 'regular', true,
+       'G-SEED01', true, 'RECEIVED', now() - interval '5 hours', now() - interval '4 hours 50 minutes',
+       'W-001', 6, now() - interval '5 hours')`,
+  );
+  await query(
+    `INSERT INTO give_requests (id, student_id, student_name, bag_number, quantity, service, ironing,
+       code, seen, status, created_at, qr_expires_at, worker_id, confirmed_quantity, received_at)
+     VALUES ('give-seed-2', 'RU2026CS003', 'Ishaan Kumar', 'B-003', 4, 'urgent', false,
+       'G-SEED02', true, 'RECEIVED', now() - interval '26 hours', now() - interval '25 hours 50 minutes',
+       'W-002', 4, now() - interval '26 hours')`,
+  );
+  await query(
+    `INSERT INTO take_requests (id, student_id, student_name, bag_number, quantity, service, ironing,
+       code, seen, status, created_at, qr_expires_at, worker_id, confirmed_quantity, received_at)
+     VALUES ('take-seed-1', 'RU2026CS001', 'Aarav Sharma', 'B-001', 5, 'regular', false,
+       'T-SEED01', true, 'COMPLETED', now() - interval '3 days', now() - interval '3 days' + interval '10 minutes',
+       'W-001', 5, now() - interval '3 days')`,
   );
   await query(
     `INSERT INTO activity (action, actor_name, actor_role, student_id, student_name, bag_number,

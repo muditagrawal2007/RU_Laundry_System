@@ -49,6 +49,18 @@ function hidePhoto(request) {
   return { ...request, photoId: undefined };
 }
 
+/** Finds one request, either a submission or a collection. */
+async function findRequestById(kind, id) {
+  if (kind === "give") return queryOne("SELECT * FROM give_requests WHERE id = $1", [id]);
+  return queryOne("SELECT * FROM take_requests WHERE id = $1", [id]);
+}
+
+/** How many days a service takes. */
+function daysFor(service) {
+  if (service === "regular") return 3;
+  return 1; // urgent and ironing are ready in one day
+}
+
 /* ------------------------------------------------------------------------ */
 /* Dashboard                                                                 */
 /* ------------------------------------------------------------------------ */
@@ -79,8 +91,29 @@ router.get("/dashboard", async (req, res) => {
 
 // Reads a scanned code and returns the request it belongs to.
 // A fake, expired or already used code is refused. Nothing is handed over here.
+//
+// Two kinds of code work:
+//   - the signed text of a QR code (what the phone shows)
+//   - the short code under it, like "G-4KP7XZ" (what the worker types in)
 router.post("/qr/scan", async (req, res) => {
-  const payload = readQrToken(req.body.text);
+  const text = String(req.body.text || "").trim();
+
+  // The short code first: it is what the worker types in. The QR text may have
+  // "RU-LAUNDRY|" in front of it, so we keep only the last part.
+  const short = text.toUpperCase().split("|").pop().trim();
+  const byCode = await queryOne(
+    `SELECT id, 'give' AS kind FROM give_requests WHERE code = $1
+     UNION ALL
+     SELECT id, 'take' AS kind FROM take_requests WHERE code = $1`,
+    [short],
+  );
+  if (byCode) {
+    const request = await findRequestById(byCode.kind, byCode.id);
+    if (!request) throw new ApiError(409, BAD_QR);
+    return res.json({ kind: byCode.kind, request: byCode.kind === "give" ? hidePhoto(request) : request });
+  }
+
+  const payload = readQrToken(text);
   if (!payload) {
     throw new ApiError(
       400,
@@ -139,12 +172,27 @@ router.post("/give-requests/:id/verify", async (req, res) => {
   );
   if (!updated) throw new ApiError(409, "This request has already been handled.");
 
+  // The bag now has the service the student chose, and it is due in a few days.
+  const service = request.service || "regular";
+  const dueAt = new Date(Date.now() + daysFor(service) * 86400000);
+
   await query(
     `UPDATE bags
-     SET status = 'IN_PROCESS', quantity = $1, received_at = now(), returned_at = NULL,
-         collected_at = NULL, updated_by = $2, updated_at = now()
-     WHERE bag_number = $3`,
-    [quantity, worker.name, bag.bagNumber],
+     SET status = 'IN_PROCESS', quantity = $1, service = $2, ironing = $3,
+         progress = $4, due_at = $5, received_at = now(), returned_at = NULL,
+         collected_at = NULL, received_by = $6, returned_by = NULL,
+         updated_by = $7, updated_at = now()
+     WHERE bag_number = $8`,
+    [
+      quantity,
+      service,
+      request.ironing,
+      service === "ironing" ? "Ironing in Progress" : "Bag received",
+      dueAt,
+      worker.id,
+      worker.name,
+      bag.bagNumber,
+    ],
   );
 
   await logActivity({
@@ -185,10 +233,12 @@ router.post("/give-requests/:id/return-to-counter", async (req, res) => {
   if (!bag) throw new ApiError(404, "Bag not found.");
 
   const updated = await queryOne(
-    `UPDATE bags SET status = 'AT_COUNTER', returned_at = now(), updated_by = $1, updated_at = now()
-     WHERE bag_number = $2 AND status = 'IN_PROCESS'
+    `UPDATE bags
+     SET status = 'AT_COUNTER', progress = NULL, returned_at = now(), returned_by = $1,
+         updated_by = $2, updated_at = now()
+     WHERE bag_number = $3 AND status = 'IN_PROCESS'
      RETURNING *`,
-    [worker.name, bag.bagNumber],
+    [worker.id, worker.name, bag.bagNumber],
   );
   if (!updated) throw new ApiError(409, "This bag is not in process.");
 
@@ -212,6 +262,44 @@ router.post("/give-requests/:id/return-to-counter", async (req, res) => {
   );
 
   res.json(await findBagByNumber(bag.bagNumber));
+});
+
+// The worker moves the bag on to the next step: washing, then ironing.
+router.post("/bags/:bagNumber/progress", async (req, res) => {
+  const worker = req.user;
+  const bag = await findBagByNumber(req.params.bagNumber);
+  if (!bag) throw new ApiError(404, "Bag not found.");
+  if (bag.status !== "IN_PROCESS") throw new ApiError(409, "This bag is not being washed.");
+
+  const progress = String(req.body.progress || "");
+  const allowed = ["Bag received", "Washing in Progress", "Ironing in Progress"];
+  if (!allowed.includes(progress)) throw new ApiError(400, "That is not a step of the washing.");
+
+  const updated = await queryOne(
+    `UPDATE bags SET progress = $1, updated_by = $2, updated_at = now()
+     WHERE bag_number = $3
+     RETURNING *`,
+    [progress, worker.name, bag.bagNumber],
+  );
+
+  await logActivity({
+    action: "Progress: " + progress,
+    actorName: worker.name,
+    actorRole: "WORKER",
+    studentId: bag.studentId,
+    studentName: bag.studentName,
+    bagNumber: bag.bagNumber,
+    result: progress,
+    kind: "BAG",
+  });
+  await notifyStudent(
+    bag.studentId,
+    "Your laundry update: " + progress + ".",
+    "Your laundry update: " + progress + ".",
+    "/student",
+  );
+
+  res.json(updated);
 });
 
 /* ------------------------------------------------------------------------ */
@@ -267,7 +355,8 @@ router.post("/take-requests/:id/handover", async (req, res) => {
 
   await query(
     `UPDATE bags
-     SET status = 'NOT_GIVEN', quantity = 0, collected_at = now(), returned_at = NULL,
+     SET status = 'NOT_GIVEN', quantity = 0, service = 'regular', ironing = false,
+         progress = NULL, due_at = NULL, collected_at = now(), returned_at = NULL,
          updated_by = $1, updated_at = now()
      WHERE bag_number = $2`,
     [worker.name, request.bagNumber],

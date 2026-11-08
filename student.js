@@ -41,12 +41,11 @@ function bindStudentEvents() {
     if (act === "complaint-submit") submitComplaint();
   });
  
-  $("page-s-notifications").addEventListener("click", function (e) {
+  $("page-s-notifications").addEventListener("click", async function (e) {
     if (!e.target.closest("[data-act='mark-read']")) return;
     const s = currentUser();
-    db = loadData();
-    db.notifications.forEach(function (n) { if (n.studentId === s.id) n.read = true; });
-    saveData(db);
+    await api.markNotificationsRead(s.id);
+    db = await loadData();
     renderCurrent();
   });
  
@@ -326,101 +325,112 @@ function handlePhotoFile(file) {
   reader.readAsDataURL(file);
 }
  
-function createTxn(type, s, bag, quantity, photo, giveTxnId, opts) {
-  const now = new Date();
-  const t = {
-    id: "TX" + Date.now() + Math.floor(Math.random() * 1000), type: type, studentId: s.id, bag: bag.number, quantity: quantity, service: opts.service, ironing: opts.ironing,
-    status: "qr_generated", code: newCode(type === "give" ? "G" : "T"), createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + QR_MINUTES * 60000).toISOString(), seen: false, giveTxnId: giveTxnId || null, events: []
-  };
-  addEvent(t, (type === "give" ? "Give Clothes request created" : "Collection request created") + " (" + serviceText(opts) + ")", s.id);
-  addEvent(t, "QR code generated", s.id);
-  db.transactions.push(t);
-  if (photo) setPhoto(t.id, photo);
-  logActivity(type === "give" ? "Give Clothes request created" : "Collection request created", s.id, bag.number, s.id);
-  return t;
+// The server makes the request, the code and the history lines. It answers with
+// the request, so the screen can draw the QR code straight away.
+async function createTxn(type, s, bag, quantity, photo, giveTxnId, opts) {
+  if (type === "give") {
+    const answer = await api.createGiveRequest(s.id, quantity, opts.service, opts.ironing, photo);
+    return { request: answer.request, qrText: answer.qrText };
+  }
+  const answer = await api.createTakeRequest(s.id, giveTxnId);
+  return { request: answer.request, qrText: answer.qrText };
 }
  
-function acknowledgeResults() {
-  db = loadData();
+async function acknowledgeResults() {
   const s = currentUser();
-  db.transactions.forEach(function (t) { if (t.studentId === s.id && !isActive(t)) t.seen = true; });
-  saveData(db);
+  await api.acknowledgeResults(s.id);
+  db = await loadData();
 }
  
-function generateGive() {
-  db = loadData();
+async function generateGive() {
+  db = await loadData();
   const s = currentUser(), bag = bagOfStudent(s.id);
   if (!db.counterOpen) { showToast("The counter is closed right now.", true); renderCurrent(); return; }
   if (bag.status !== BAG_NOT_GIVEN || activeTxn(s.id)) { showToast("You cannot start a new Give Clothes request right now.", true); renderCurrent(); return; }
   if (giveService === "urgent" && !urgentOn()) { showToast("One-day urgent service is switched off right now.", true); renderCurrent(); return; }
-  createTxn("give", s, bag, giveQty, givePhoto, null, { service: giveService, ironing: giveService === "ironing" ? true : giveIroning });
-  givePhoto = null;
-  giveQty = 1;
-  giveService = "regular";
-  giveIroning = false;
-  saveData(db);
-  renderCurrent();
-  showToast("Your submission QR code is ready.");
+  try {
+    const made = await createTxn("give", s, bag, giveQty, givePhoto, null, { service: giveService, ironing: giveService === "ironing" ? true : giveIroning });
+    givePhoto = null;
+    giveQty = 1;
+    giveService = "regular";
+    giveIroning = false;
+    db = await loadData();
+    renderCurrent();
+    showToast("Your submission QR code is ready.");
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The request could not be made.", true);
+    renderCurrent();
+  }
 }
  
-function createTake() {
-  db = loadData();
+async function createTake() {
+  db = await loadData();
   const s = currentUser(), bag = bagOfStudent(s.id);
   if (!db.counterOpen) { showToast("The counter is closed right now.", true); renderCurrent(); return; }
   if (bag.status !== BAG_AT_COUNTER || activeTxn(s.id)) { showToast("You cannot start a collection right now.", true); renderCurrent(); return; }
   const g = lastGiveTxn(s.id);
-  createTxn("take", s, bag, bag.quantity, null, g ? g.id : null, { service: bag.service, ironing: bag.ironing });
-  saveData(db);
-  renderCurrent();
-  showToast("Your collection QR code is ready.");
+  try {
+    const made = await createTxn("take", s, bag, bag.quantity, null, g ? g.id : null, { service: bag.service, ironing: bag.ironing });
+    db = await loadData();
+    renderCurrent();
+    showToast("Your collection QR code is ready.");
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The request could not be made.", true);
+    renderCurrent();
+  }
 }
  
-function regenerate(oldId) {
-  db = loadData();
+async function regenerate(oldId) {
+  db = await loadData();
   const s = currentUser(), bag = bagOfStudent(s.id);
   const old = db.transactions.find(function (t) { return t.id === oldId; });
   if (!old || activeTxn(s.id)) return;
   if (!db.counterOpen) { showToast("The counter is closed right now. Try again when it opens.", true); return; }
- 
-  if (old.type === "give") {
-    if (bag.status !== BAG_NOT_GIVEN) { showToast("Your bag is no longer waiting to be given.", true); return; }
-    if (old.service === "urgent" && !urgentOn()) { showToast("One-day urgent service is switched off right now.", true); return; }
-    createTxn("give", s, bag, old.quantity, getPhoto(old.id), null, { service: old.service, ironing: old.ironing });
-  } else {
-    if (bag.status !== BAG_AT_COUNTER) { showToast("Your bag is not at the counter.", true); return; }
-    createTxn("take", s, bag, bag.quantity, null, old.giveTxnId, { service: bag.service, ironing: bag.ironing });
+
+  try {
+    if (old.type === "give") {
+      if (bag.status !== BAG_NOT_GIVEN) { showToast("Your bag is no longer waiting to be given.", true); return; }
+      if (old.service === "urgent" && !urgentOn()) { showToast("One-day urgent service is switched off right now.", true); return; }
+      await createTxn("give", s, bag, old.quantity, getPhoto(old.id), null, { service: old.service, ironing: old.ironing });
+    } else {
+      if (bag.status !== BAG_AT_COUNTER) { showToast("Your bag is not at the counter.", true); return; }
+      await createTxn("take", s, bag, bag.quantity, null, old.giveTxnId, { service: bag.service, ironing: bag.ironing });
+    }
+    await api.acknowledgeResults(s.id);
+    db = await loadData();
+    renderCurrent();
+    showToast("New QR code generated.");
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The new QR code could not be made.", true);
+    renderCurrent();
   }
-  db.transactions.forEach(function (t) { if (t.studentId === s.id && !isActive(t)) t.seen = true; });
-  saveData(db);
-  renderCurrent();
-  showToast("New QR code generated.");
 }
- 
-function verifyCollection(id) {
-  db = loadData();
-  expireTransactions();
-  const t = db.transactions.find(function (x) { return x.id === id; });
-  if (!t || t.status !== "scanned") { renderCurrent(); return; }
-  t.status = "student_verified";
-  t.studentVerifiedAt = nowIso();
-  addEvent(t, "Student verified the collection", t.studentId);
-  logActivity("Student verification received", t.studentId, t.bag, t.studentId);
-  saveData(db);
-  renderCurrent();
+
+async function verifyCollection(id) {
+  const s = currentUser();
+  try {
+    await api.verifyTakeRequest(s.id, id);
+    db = await loadData();
+    renderCurrent();
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The collection could not be verified.", true);
+    renderCurrent();
+  }
 }
- 
-function cancelTxn(id) {
-  db = loadData();
+
+async function cancelTxn(id) {
+  db = await loadData();
   const t = db.transactions.find(function (x) { return x.id === id; });
   if (!t || t.status !== "qr_generated") { renderCurrent(); return; }   // too late to cancel once the worker has scanned it
-  t.status = "cancelled";
-  t.seen = true;
-  addEvent(t, "Request cancelled by the student", t.studentId);
-  logActivity("Request cancelled by the student", t.studentId, t.bag, t.studentId);
-  saveData(db);
-  showToast("Request cancelled.");
-  showPage("s-dashboard");
+  try {
+    await api.cancelRequest(t.studentId, t.id, t.type);
+    db = await loadData();
+    showToast("Request cancelled.");
+    showPage("s-dashboard");
+  } catch (err) {
+    showToast(err && err.message ? err.message : "The request could not be cancelled.", true);
+    renderCurrent();
+  }
 }
  
 // ======================================================
@@ -508,25 +518,20 @@ function renderComplaints() {
   $("page-s-complaints").innerHTML = html;
 }
  
-function submitComplaint() {
-  db = loadData();
-  const s = currentUser(), bag = bagOfStudent(s.id);
+async function submitComplaint() {
+  const s = currentUser();
   const text = $("complaintText").value.trim();
   if (text.length < 10) { $("complaintError").textContent = "Please describe the problem in at least 10 characters."; return; }
- 
-  const numbers = db.complaints.map(function (c) { return parseInt(c.id.slice(2), 10); });
-  const next = (numbers.length ? Math.max.apply(null, numbers) : 1000) + 1;
-  const c = {
-    id: "C-" + next, studentId: s.id, bag: bag ? bag.number : "-", txnId: $("complaintTxn").value || null,
-    category: $("complaintCategory").value, description: text, status: "Open", createdAt: nowIso(), updatedAt: nowIso(),
-    updates: [{ time: nowIso(), by: s.id, text: "Complaint submitted", status: "Open" }]
-  };
-  db.complaints.push(c);
-  logActivity("Complaint " + c.id + " submitted", s.id, c.bag, s.id);
-  saveData(db);
-  complaintFormOpen = false;
-  complaintMsg = c.id + "|" + c.createdAt;
-  renderCurrent();
+
+  try {
+    const c = await api.createComplaint(s.id, $("complaintCategory").value, text, $("complaintTxn").value || null);
+    db = await loadData();
+    complaintFormOpen = false;
+    complaintMsg = c.ref + "|" + c.createdAt;
+    renderCurrent();
+  } catch (err) {
+    $("complaintError").textContent = err && err.message ? err.message : "The complaint could not be sent.";
+  }
 }
  
 // ======================================================

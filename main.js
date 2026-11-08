@@ -1,10 +1,27 @@
-// main.js - storage, login, navigation and the rules shared by all three portals.
-// NOTE: localStorage is only a demo database. It is not secure and does not sync
-// between devices. For a real system, replace loadData() / saveData() with API calls.
- 
-const STORAGE_KEY = "ruLaundryDemo";
-const PHOTO_KEY = "ruLaundryPhotos";      // reference photos are kept apart from everything else
+// main.js - the server, login, navigation and the rules shared by all three portals.
+//
+// All the data is in the PostgreSQL database on the server. api.js is the only
+// file that talks to it; this file and the two screen files use the data it
+// brings back.
+
 const SESSION_KEY = "ruLaundrySession";   // per tab, so you can test 3 portals in 3 tabs
+
+// The demo accounts of the sign in screen. They are the same accounts the
+// server has, so this list only helps the person who is trying the app.
+const DEMO_ACCOUNTS = {
+  student: [
+    { id: "RU2026CS001", name: "Aarav Sharma", password: "ru@2026", bag: "B-001" },
+    { id: "RU2026CS002", name: "Ananya Verma", password: "ru@2026", bag: "B-002" },
+    { id: "RU2026CS003", name: "Ishaan Kumar", password: "ru@2026", bag: "B-003" }
+  ],
+  worker: [
+    { id: "W-001", name: "Ramesh Yadav", password: "worker@ru" },
+    { id: "W-002", name: "Sunita Devi", password: "worker@ru" }
+  ],
+  admin: [
+    { id: "admin", name: "Dr. Priya Menon", password: "admin@ru" }
+  ]
+};
  
 const QR_MINUTES = 10;       // how long a QR code stays valid
 const VERIFY_MINUTES = 5;    // how long the student has to verify after the worker scans
@@ -47,7 +64,11 @@ const ICONS = {
 };
  
 const renderers = {};     // every page registers its own render function here
-let db = loadData();
+let db = {                // the data of the server, filled in by loadData()
+  students: [], workers: [], admins: [], bags: [], transactions: [],
+  complaints: [], notifications: [], activity: [],
+  counterOpen: true, settings: { urgentEnabled: true }
+};
 let loginRole = "student";
 let currentPage = "";
 let currentParam = "";
@@ -55,51 +76,42 @@ let lastSig = "";
 let toastTimer = null;
 let dialogCallback = null;
  
-// ================= STORAGE =================
- 
-function loadData() {
-  try {
-    const text = localStorage.getItem(STORAGE_KEY);
-    if (!text) return resetData();
-    const d = JSON.parse(text);
-    const ok = d && Array.isArray(d.students) && Array.isArray(d.workers) && Array.isArray(d.admins) && Array.isArray(d.bags) &&
-      Array.isArray(d.transactions) && Array.isArray(d.complaints) && Array.isArray(d.notifications) && Array.isArray(d.activity);
-    if (!ok) return resetData();   // data was missing or broken, start fresh
-    return d;
-  } catch (e) {
-    return resetData();
+// ================= THE SERVER =================
+
+// All the data lives in the PostgreSQL database on the server. loadData() asks
+// the server for what this area needs, and every change goes back through api.js.
+// The screens never call fetch() themselves.
+
+let photos = {};      // the reference photos of the student, by submission id
+
+async function loadData() {
+  const role = currentRole();
+  if (role === "student") {
+    const data = await api.loadStudentData();
+    photos = await api.loadStudentPhotos();
+    return data;
   }
+  if (role === "worker") return api.loadWorkerData();
+  if (role === "admin") return api.loadAdminData();
+  return { students: [], workers: [], admins: [], bags: [], transactions: [], complaints: [], notifications: [], activity: [] };
 }
- 
-function saveData(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
- 
-function resetData() {
-  const fresh = buildSampleData();
-  localStorage.removeItem(PHOTO_KEY);
-  saveData(fresh);
-  return fresh;
-}
- 
+
+// The old saveData() is gone: a change is made by calling the server, and then
+// the data is read again. So there is nothing to save here any more.
+function saveData(data) { return data; }
+
 function resetDemo() {
   askConfirm({ title: "Reset demo data?", text: "All requests, complaints and changes will be deleted and the sample data will come back.", yes: "Reset" }, function () {
     sessionStorage.removeItem(SESSION_KEY);
-    db = resetData();
+    api.setToken(null);
     showLanding();
     showToast("Demo data has been reset.");
   });
 }
- 
+
 // Reference photos: only the student's own screens ever call getPhoto()
-function loadPhotos() {
-  try { return JSON.parse(localStorage.getItem(PHOTO_KEY)) || {}; } catch (e) { return {}; }
-}
-function getPhoto(txnId) { return loadPhotos()[txnId] || null; }
-function setPhoto(txnId, dataUrl) {
-  const all = loadPhotos();
-  all[txnId] = dataUrl;
-  try { localStorage.setItem(PHOTO_KEY, JSON.stringify(all)); }
-  catch (e) { showToast("The photo is too large to save. Try a smaller one.", true); }
-}
+function getPhoto(txnId) { return photos[txnId] || null; }
+function setPhoto(txnId, dataUrl) { photos[txnId] = dataUrl; }
  
 // ================= SMALL HELPERS =================
  
@@ -177,52 +189,14 @@ function personName(id) {
   return p ? p.name : id;
 }
  
-function addEvent(t, text, by) { t.events.push({ time: nowIso(), text: text, by: by || "" }); }
- 
-function logActivity(text, studentId, bag, by) {
-  db.activity.unshift({ time: nowIso(), text: text, studentId: studentId || "", bag: bag || "", by: by || "" });
-  if (db.activity.length > 300) db.activity.length = 300;
-}
- 
-function notifyStudent(studentId, text) {
-  db.notifications.unshift({ id: "N" + Date.now() + Math.floor(Math.random() * 1000), studentId: studentId, text: text, time: nowIso(), read: false });
-  if (db.notifications.length > 300) db.notifications.length = 300;
-}
- 
-function newCode(prefix) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code;
-  do {
-    code = prefix + "-";
-    for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-  } while (db.transactions.some(function (t) { return t.code === code; }));
-  return code;
-}
- 
+// The server writes the history lines and the notifications, and it marks the
+// old QR codes as expired. So these helpers are not needed in the browser any more.
+
+// The code the worker types in. It can be the whole QR text or just the short
+// code under it, like "G-4KP7XZ".
 function normalizeCode(raw) {
   const parts = String(raw || "").trim().toUpperCase().split("|");
   return parts[parts.length - 1].trim();
-}
- 
-// Marks old QR codes / verification sessions as expired. Returns true if anything changed.
-function expireTransactions() {
-  const now = Date.now();
-  let changed = false;
-  db.transactions.forEach(function (t) {
-    if (t.status === "qr_generated" && Date.parse(t.expiresAt) < now) {
-      t.status = "expired"; t.seen = false;
-      addEvent(t, t.type === "give" ? "Submission QR expired" : "Collection QR expired", "system");
-      notifyStudent(t.studentId, t.type === "give" ? "Your submission QR code has expired." : "Your collection QR code has expired.");
-      changed = true;
-    } else if (t.status === "scanned" && Date.parse(t.verifyExpiresAt) < now) {
-      t.status = "expired"; t.seen = false;
-      addEvent(t, "Verification session expired", "system");
-      notifyStudent(t.studentId, "Your collection session has expired. Generate a new QR.");
-      changed = true;
-    }
-  });
-  if (changed) saveData(db);
-  return changed;
 }
  
 // words used in lists
@@ -348,8 +322,7 @@ function buildSidebar() {
   $("sidebar").innerHTML = html;
 }
  
-function showPage(pageId, param) {
-  db = loadData();
+async function showPage(pageId, param) {
   currentPage = pageId;
   currentParam = param || "";
   document.querySelectorAll(".page").forEach(function (p) { p.classList.add("hidden"); });
@@ -361,12 +334,18 @@ function showPage(pageId, param) {
     b.classList.toggle("active", b.getAttribute("data-page") === navId);
   });
   $("sidebar").classList.remove("open");
+  try {
+    db = await loadData();
+  } catch (err) {
+    showToast(err && err.message ? err.message : "Cannot reach the laundry server.", true);
+    return;
+  }
   renderCurrent();
   window.scrollTo(0, 0);
 }
  
 function renderCurrent() {
-  lastSig = localStorage.getItem(STORAGE_KEY) || "";
+  lastSig = "";
   const fn = renderers[currentPage];
   if (fn) fn(currentParam);
   updateBell();
@@ -398,7 +377,6 @@ function showLanding() {
 }
  
 function openLogin(role) {
-  db = loadData();
   loginRole = role;
   const info = ROLE_INFO[role];
   $("landing").classList.add("hidden");
@@ -414,48 +392,48 @@ function openLogin(role) {
   $("loginError").textContent = "";
   $("loginFooter").textContent = info.footer;
   $("headerText").textContent = info.headerText;
- 
+
   let rows = "";
-  if (role === "student") {
-    db.students.forEach(function (s) {
-      const bag = bagOfStudent(s.id);
-      rows += demoRow(s.id, s.password, s.name + " (" + (bag ? bag.status.toLowerCase() : "no bag") + ")");
-    });
-  } else {
-    (role === "worker" ? db.workers : db.admins).forEach(function (u) { rows += demoRow(u.id, u.password, u.name); });
-  }
+  DEMO_ACCOUNTS[role].forEach(function (u) {
+    rows += demoRow(u.id, u.password, u.name + (u.bag ? " (" + u.bag + ")" : ""));
+  });
   $("demoList").innerHTML = rows;
   window.scrollTo(0, 0);
 }
- 
+
 function demoRow(id, password, label) {
   return '<button class="demo-row" data-id="' + esc(id) + '" data-pw="' + esc(password) + '"><span>' + esc(label) + "</span><span>" + esc(id) + " / " + esc(password) + "</span></button>";
 }
- 
-function doLogin() {
-  db = loadData();
-  const id = $("loginId").value.trim().toLowerCase();
+
+async function doLogin() {
+  const id = $("loginId").value.trim();
   const pw = $("loginPassword").value;
   if (id === "" || pw === "") { $("loginError").textContent = "Please enter your ID and password."; return; }
- 
-  let list = db.admins;
-  if (loginRole === "student") list = db.students;
-  if (loginRole === "worker") list = db.workers;
-  const user = list.find(function (u) { return u.id.toLowerCase() === id && u.password === pw; });
-  if (!user) { $("loginError").textContent = ROLE_INFO[loginRole].error; return; }
- 
+
   $("loginBtn").disabled = true;
   $("loginBtn").textContent = "Logging in...";
-  setTimeout(function () {
+  try {
+    const user = await api.login(loginRole, id, pw);
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ role: loginRole, id: user.id }));
+  } catch (err) {
+    $("loginError").textContent = err && err.message ? err.message : ROLE_INFO[loginRole].error;
     $("loginBtn").disabled = false;
     $("loginBtn").textContent = "Login";
-    startApp();
-  }, 400);
+    return;
+  }
+  $("loginBtn").disabled = false;
+  $("loginBtn").textContent = "Login";
+  startApp();
 }
- 
-function startApp() {
-  db = loadData();
+
+async function startApp() {
+  try {
+    db = await loadData();
+  } catch (err) {
+    showLanding();
+    showToast(err && err.message ? err.message : "Cannot reach the laundry server.", true);
+    return;
+  }
   const user = currentUser();
   if (!user) { showLanding(); return; }
   const role = currentRole();
@@ -482,19 +460,31 @@ function confirmLogout() {
 }
  
 // ================= LIVE UPDATES (runs every second) =================
- 
-function tick() {
-  if (!getSession()) return;
-  db = loadData();
-  expireTransactions();
-  const sig = localStorage.getItem(STORAGE_KEY) || "";
-  if (sig !== lastSig) {
-    const el = document.activeElement;
-    const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
-    if (!typing) renderCurrent();   // do not wipe what someone is typing
+
+// The server is asked for the data again, so the screens stay up to date when
+// somebody else (a worker, for example) does something.
+let tickBusy = false;
+
+async function tick() {
+  if (!getSession() || tickBusy) return;
+  tickBusy = true;
+  try {
+    const fresh = await loadData();
+    const sig = JSON.stringify(fresh.transactions) + JSON.stringify(fresh.notifications) + JSON.stringify(fresh.activity);
+    db = fresh;
+    if (sig !== lastSig) {
+      const el = document.activeElement;
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
+      if (!typing) renderCurrent();   // do not wipe what someone is typing
+      lastSig = sig;
+    }
+    updateCountdowns();
+    updateBell();
+  } catch (err) {
+    // The server is not reachable right now. The next tick tries again.
+  } finally {
+    tickBusy = false;
   }
-  updateCountdowns();
-  updateBell();
 }
  
 // ================= START =================
@@ -550,7 +540,7 @@ function init() {
     dialogCallback = null;
   });
  
-  window.addEventListener("storage", function (e) { if (e.key === STORAGE_KEY) tick(); });
+  window.addEventListener("storage", function () { tick(); });
   setInterval(tick, 1000);
  
   startApp();   // restores the session after a refresh

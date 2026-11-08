@@ -7,7 +7,7 @@
 
 DROP TABLE IF EXISTS sessions, notifications, complaint_updates, complaints, activity,
   take_requests, give_requests, photos, bags, users, counter_state, counter_schedule,
-  counter_closures CASCADE;
+  counter_closures, settings CASCADE;
 DROP SEQUENCE IF EXISTS complaint_number;
 
 -- ---------------------------------------------------------------------------
@@ -45,9 +45,20 @@ CREATE TABLE bags (
   status       TEXT NOT NULL DEFAULT 'NOT_GIVEN'
                CHECK (status IN ('NOT_GIVEN', 'IN_PROCESS', 'AT_COUNTER')),
   quantity     INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  -- Which service the student chose. "ironing" means ironing only, no washing.
+  service      TEXT NOT NULL DEFAULT 'regular'
+               CHECK (service IN ('regular', 'urgent', 'ironing')),
+  -- True when the student wants the clothes ironed as well.
+  ironing      BOOLEAN NOT NULL DEFAULT false,
+  -- The step the bag is at while it is being washed ("Washing in Progress").
+  progress     TEXT,
+  -- When the clothes should be ready at the counter.
+  due_at       TIMESTAMPTZ,
   received_at  TIMESTAMPTZ,
   returned_at  TIMESTAMPTZ,
   collected_at TIMESTAMPTZ,
+  received_by  TEXT REFERENCES users(id),
+  returned_by  TEXT REFERENCES users(id),
   updated_by   TEXT NOT NULL DEFAULT 'System',
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -75,8 +86,16 @@ CREATE TABLE give_requests (
   bag_number         TEXT NOT NULL REFERENCES bags(bag_number),
   quantity           INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 15),
   photo_id           TEXT REFERENCES photos(id),
+  -- Which service the student chose.
+  service            TEXT NOT NULL DEFAULT 'regular'
+                     CHECK (service IN ('regular', 'urgent', 'ironing')),
+  ironing            BOOLEAN NOT NULL DEFAULT false,
+  -- The short code the student shows and the worker types in.
+  code               TEXT UNIQUE,
+  -- True once the student has seen the result of this request.
+  seen               BOOLEAN NOT NULL DEFAULT false,
   status             TEXT NOT NULL DEFAULT 'PENDING'
-                     CHECK (status IN ('PENDING', 'RECEIVED', 'EXPIRED')),
+                     CHECK (status IN ('PENDING', 'RECEIVED', 'EXPIRED', 'CANCELLED')),
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   qr_expires_at      TIMESTAMPTZ NOT NULL,
   scanned_at         TIMESTAMPTZ,
@@ -93,8 +112,18 @@ CREATE TABLE take_requests (
   student_name        TEXT NOT NULL,
   bag_number          TEXT NOT NULL REFERENCES bags(bag_number),
   quantity            INTEGER NOT NULL DEFAULT 0,
+  -- Which service the student chose.
+  service             TEXT NOT NULL DEFAULT 'regular'
+                      CHECK (service IN ('regular', 'urgent', 'ironing')),
+  ironing             BOOLEAN NOT NULL DEFAULT false,
+  -- The short code the student shows and the worker types in.
+  code                TEXT UNIQUE,
+  -- True once the student has seen the result of this request.
+  seen                BOOLEAN NOT NULL DEFAULT false,
+  -- The submission this collection belongs to.
+  give_request_id     TEXT REFERENCES give_requests(id),
   status              TEXT NOT NULL DEFAULT 'PENDING'
-                      CHECK (status IN ('PENDING', 'SCANNED', 'VERIFIED', 'COMPLETED', 'EXPIRED')),
+                      CHECK (status IN ('PENDING', 'SCANNED', 'VERIFIED', 'COMPLETED', 'EXPIRED', 'CANCELLED')),
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   qr_expires_at       TIMESTAMPTZ NOT NULL,
   session_expires_at  TIMESTAMPTZ,
@@ -114,6 +143,17 @@ CREATE UNIQUE INDEX one_open_take_per_student ON take_requests (student_id)
 -- A student's history, already sorted by time.
 CREATE INDEX give_requests_by_student ON give_requests (student_id, created_at);
 CREATE INDEX take_requests_by_student ON take_requests (student_id, created_at);
+
+-- ---------------------------------------------------------------------------
+-- Settings
+-- ---------------------------------------------------------------------------
+
+-- Always exactly one row (id = 1).
+CREATE TABLE settings (
+  id              INTEGER PRIMARY KEY CHECK (id = 1),
+  -- False when the one-day urgent service is switched off.
+  urgent_enabled  BOOLEAN NOT NULL DEFAULT true
+);
 
 -- ---------------------------------------------------------------------------
 -- Activity history (the audit log)
