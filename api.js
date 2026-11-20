@@ -259,6 +259,7 @@ async function loadStudentData() {
   data.students.push({ id: dashboard.student.studentId, name: dashboard.student.name, bag: dashboard.student.bagNumber });
   data.bags.push(toBag(dashboard.bag));
   data.counterOpen = dashboard.counter.isOpen;
+  data.activity = dashboard.recentActivity.map(toActivity);
 
   const history = await call("GET", "/student/history");
   data.transactions = history.map(function (row) {
