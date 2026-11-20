@@ -1,0 +1,35 @@
+# The RU Laundry System on Render.
+#
+# Apply it in the Render dashboard ("New" -> "Blueprint") and pick this
+# repository. The whole app (the page and the API) becomes one web service.
+#
+# The database is NOT created here. Put the address of a PostgreSQL database in
+# DATABASE_URL when Render asks for it. A free one can be made at
+# https://neon.com (it does not expire, unlike the free Render Postgres,
+# which is thrown away 30 days after it is made).
+#
+# The demo data is loaded right after the first deploy (the initialDeployHook).
+
+services:
+  - type: web
+    name: ru-laundry
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: cd backend && npm ci
+    startCommand: cd backend && npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    initialDeployHook: cd backend && npm run db:setup || echo "The database was not seeded. Run 'npm run db:setup' with the DATABASE_URL of the database."
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: QR_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: TIMEZONE
+        value: Asia/Kolkata
+      # A demo server may wipe its own data with the "reset demo" button.
+      - key: ALLOW_DEMO_RESET
+        value: "true"

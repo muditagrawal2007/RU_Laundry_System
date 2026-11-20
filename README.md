@@ -19,16 +19,45 @@ createdb ru_laundry
 npm run db:setup              # creates the tables and the demo data
 npm run dev                    # http://localhost:4000
 
-# 2. the frontend (this folder)
-cd ..
-python3 -m http.server 5500   # any static server will do
+# 2. the frontend
 ```
 
-Then open <http://localhost:5500>.
+The backend sends the frontend out as well, so the whole app is on
+<http://localhost:4000>. That is the easiest way to work on it.
 
-The backend only allows the frontend address that is written in `FRONTEND_URL` in
-`backend/.env`. If you serve the frontend on a different port, change that value and
-restart the backend.
+To work on the frontend with a live reload, serve it yourself as well:
+
+```bash
+python3 -m http.server 5500   # then open http://localhost:5500
+```
+
+The backend only allows the frontend addresses that are written in
+`FRONTEND_URL` in `backend/.env`. If you serve the frontend on a different port,
+add that address there and restart the backend.
+
+## Host it on Render (free)
+
+The page and the API are one service, so the hosted app gets one address.
+
+1. **The database.** Make a free PostgreSQL at <https://neon.com> (sign up, then
+   "New project", then copy the connection string). The free Render Postgres
+   works too, but it is deleted 30 days after it is made.
+2. **The service.** In the [Render dashboard](https://dashboard.render.com) pick
+   "New" -> "Blueprint", choose this repository and apply it. Render asks for
+   the `DATABASE_URL` (the connection string from step 1) and fills in the rest
+   itself: the QR secret, the Node version and the region.
+3. **The data.** The first deploy loads the demo data by itself. If that did
+   not work, do it by hand with the connection string:
+   ```bash
+   cd backend
+   DATABASE_URL="<the connection string>" npm run db:setup
+   ```
+4. **The address.** Render shows the address of the service at the top of its
+   page, for example `https://ru-laundry.onrender.com`. Open it and sign in.
+
+The free service sleeps after 15 minutes without traffic, so the first request
+after a pause takes about a minute. `ALLOW_DEMO_RESET` is on for the demo
+server, so an admin can wipe the demo data with the "reset demo" button.
 
 ### Demo accounts
 
@@ -52,6 +81,10 @@ staff.js        the worker application and the admin dashboard
 `api.js` is the one place that calls the server. It sends the token of the signed in role
 with every request, so the server always knows who is asking. The screens never call
 `fetch()` themselves, they use the functions in `api.js`.
+
+`api.js` asks the API on the same address as the page. When the page is served by
+another address (the `python3 -m http.server 5500` way of working), it asks
+`http://localhost:4000/api` instead.
 
 Each area keeps its own sign in (in `sessionStorage`), so a student, a worker and an
 administrator can be signed in at the same time in three tabs.

@@ -24,6 +24,10 @@ npm run dev                 # http://localhost:4000
 
 Check that it is running: <http://localhost:4000/api/health>
 
+The server sends the frontend out as well, so <http://localhost:4000> is the whole
+app. The frontend files that are served are listed in `src/frontend.js`; nothing
+else of the repository is reachable over the web.
+
 ### Demo accounts
 
 | Area | ID | Password |
@@ -51,7 +55,7 @@ backend/
     reset.js         wipe + create tables + demo data
     setup.js         npm run db:setup
     DATABASE.md      the database requirements
-  src/
+    src/
     server.js        starts the API
     app.js           Express settings and the four route groups
     config.js        settings from .env and the time limits
@@ -68,6 +72,7 @@ backend/
     photos.js        saving an uploaded photo
     filters.js       search, filter and sort for the list screens
     time.js          dates in the counter's time zone
+    frontend.js      sends the frontend files out (one address for the app)
     routes/
       auth.js        /api/auth/...
       student.js     /api/student/...
@@ -75,6 +80,13 @@ backend/
       admin.js       /api/admin/...
   tests/
 ```
+
+## Host it
+
+The repository has a [`render.yaml`](../render.yaml) blueprint. It makes one web
+service out of the backend (the page and the API on one address) and asks for
+the address of a PostgreSQL database. The steps are in the
+[README of the repository](../README.md#host-it-on-render-free).
 
 ## How the frontend talks to it
 

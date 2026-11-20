@@ -18,6 +18,9 @@ npm run dev
 
 Check it is alive: <http://localhost:4000/api/health> should answer `{"ok":true}`.
 
+The backend also sends the frontend out itself (`src/frontend.js`), so on the hosted
+version the page and the API are on one address and `"/api"` is enough.
+
 Put the address in one place in the frontend, for example:
 
 ```ts

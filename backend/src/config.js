@@ -5,7 +5,24 @@
 
 export const PORT = Number(process.env.PORT ?? 4000);
 export const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://localhost:5432/ru_laundry";
-export const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:3000";
+
+// The addresses of the frontend that are allowed to call this API.
+// More than one is allowed: FRONTEND_URL="https://one.com,https://two.com".
+// On Render the address of the service itself is used (RENDER_EXTERNAL_URL),
+// so nothing has to be set there.
+export const FRONTEND_URLS = (
+  process.env.FRONTEND_URL ??
+  (process.env.RENDER_EXTERNAL_URL
+    ? (process.env.RENDER_EXTERNAL_URL.startsWith("http")
+        ? process.env.RENDER_EXTERNAL_URL
+        : "https://" + process.env.RENDER_EXTERNAL_URL)
+    : "http://localhost:3000")
+)
+  .split(",")
+  .map((url) => url.trim())
+  .filter(Boolean);
+
+export const FRONTEND_URL = FRONTEND_URLS[0];
 // There is no default on purpose: server.js refuses to start without a real secret.
 export const QR_SECRET = process.env.QR_SECRET;
 export const TIMEZONE = process.env.TIMEZONE ?? "Asia/Kolkata";

@@ -9,9 +9,10 @@
 
 import express from "express";
 import cors from "cors";
-import { FRONTEND_URL } from "./config.js";
+import { FRONTEND_URLS } from "./config.js";
 import { handleErrors } from "./errors.js";
 import { expireOldRequests } from "./expire.js";
+import { serveFrontend } from "./frontend.js";
 import authRoutes from "./routes/auth.js";
 import studentRoutes from "./routes/student.js";
 import workerRoutes from "./routes/worker.js";
@@ -20,7 +21,18 @@ import adminRoutes from "./routes/admin.js";
 const app = express();
 
 // Let the frontend (another address) call this API.
-app.use(cors({ origin: FRONTEND_URL }));
+// The page that this server sends out is on the same address, so it never needs
+// this, but a frontend that runs somewhere else does.
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // No origin: the call did not come from a browser (curl, a health check).
+      if (!origin || FRONTEND_URLS.includes(origin)) return callback(null, true);
+      // Not on the list: no permission header is sent, so the browser stops it.
+      callback(null, false);
+    }
+  })
+);
 
 // Read JSON request bodies. The limit is big enough for one photo.
 app.use(express.json({ limit: "8mb" }));
@@ -40,6 +52,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/student", studentRoutes);
 app.use("/api/worker", workerRoutes);
 app.use("/api/admin", adminRoutes);
+
+// The frontend files, so the whole app is on one address.
+serveFrontend(app);
 
 // Any other address.
 app.use((req, res) => {

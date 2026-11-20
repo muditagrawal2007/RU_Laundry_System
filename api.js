@@ -12,7 +12,16 @@
 //
 // The server answers with JSON. The names here are the ones the screens use.
 
-const API_URL = "http://localhost:4000/api";
+// The address of the laundry API.
+//
+// The server sends this page out as well (the hosted version), so the API is
+// then on the same address as the page and "/api" is enough. In development
+// the page is opened from another port (5500), so the API is asked directly.
+// Set window.RU_API_URL before this file loads to point it somewhere else.
+const DEV_API_URL = "http://localhost:4000/api";
+const isDevPage = window.location.port !== "" && window.location.port !== "4000";
+const API_URL = window.RU_API_URL || (isDevPage ? DEV_API_URL : window.location.origin + "/api");
+
 const TOKEN_KEY = "ruLaundryToken";
 
 // ================= THE BASICS =================
