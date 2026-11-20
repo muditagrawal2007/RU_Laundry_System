@@ -1,7 +1,7 @@
 # RU Laundry System: backend
 
-The REST API and the database for the RU Laundry System (the
-[laundry-system2](https://github.com/muditagrawal2007/laundry-system2) frontend).
+The REST API and the database for the RU Laundry System (the page
+is in [`../frontend`](../frontend/), the guides in [`../docs`](../docs/)).
 
 It is kept as simple as possible:
 
@@ -25,7 +25,7 @@ npm run dev                 # http://localhost:4000
 Check that it is running: <http://localhost:4000/api/health>
 
 The server sends the frontend out as well, so <http://localhost:4000> is the whole
-app. The frontend files that are served are listed in `src/frontend.js`; nothing
+app. The `frontend/` folder in the repository root is served (see `src/frontend.js`); nothing
 else of the repository is reachable over the web.
 
 ### Demo accounts
@@ -50,12 +50,11 @@ To use another test database, set `TEST_DATABASE_URL` before running `npm test`.
 ```
 backend/
   database/
-    schema.sql       every table (read DATABASE.md first)
+    schema.sql       every table (read docs/DATABASE.md first)
     seed.js          the demo data
     reset.js         wipe + create tables + demo data
     setup.js         npm run db:setup
-    DATABASE.md      the database requirements
-    src/
+  src/
     server.js        starts the API
     app.js           Express settings and the four route groups
     config.js        settings from .env and the time limits
@@ -72,7 +71,7 @@ backend/
     photos.js        saving an uploaded photo
     filters.js       search, filter and sort for the list screens
     time.js          dates in the counter's time zone
-    frontend.js      sends the frontend files out (one address for the app)
+    frontend.js      sends the `frontend/` folder out (one address for the app)
     routes/
       auth.js        /api/auth/...
       student.js     /api/student/...
@@ -103,11 +102,11 @@ the address of a PostgreSQL database. The steps are in the
 The student, worker or admin is always taken from the token, so the frontend no longer
 sends `studentId` or `workerId` itself.
 
-### From `src/lib/api.ts` to the backend
+### From `frontend/js/api.js` to the backend
 
-Every function in the frontend's `api.ts` already names its endpoint. They all exist here:
+Every function in the frontend's `api.js` names its endpoint. They all exist here:
 
-| `api.ts` function | Endpoint |
+| `api.js` function | Endpoint |
 |---|---|
 | `login` / `logout` / `getLoggedInUser` | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session` |
 | `getStudentDashboard` | `GET /api/student/dashboard` |

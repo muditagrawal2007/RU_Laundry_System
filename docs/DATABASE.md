@@ -1,7 +1,7 @@
 # Database requirements
 
 The RU Laundry System uses **PostgreSQL** (version 14 or newer).
-All tables are created by [`schema.sql`](schema.sql). Demo data is in [`seed.js`](seed.js).
+All tables are created by [`schema.sql`](../backend/database/schema.sql). Demo data is in [`seed.js`](../backend/database/seed.js).
 
 ```bash
 createdb ru_laundry        # make an empty database

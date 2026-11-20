@@ -4,7 +4,16 @@ The laundry system of Rishihood University, Sonipat. Three areas: the **student 
 the **worker application** and the **admin dashboard**.
 
 All the data lives in the PostgreSQL database of the **backend** in
-[`backend/`](backend/). This folder holds the frontend that talks to it.
+[`backend/`](backend/). The page that talks to it is in [`frontend/`](frontend/).
+
+## Repository layout
+
+```
+frontend/     the page (HTML, CSS, JavaScript), served by the backend
+backend/      the API, the database scripts and the tests
+docs/         the database guide and the frontend guide
+render.yaml   the Render hosting blueprint
+```
 
 ## Run it
 
@@ -19,7 +28,6 @@ createdb ru_laundry
 npm run db:setup              # creates the tables and the demo data
 npm run dev                    # http://localhost:4000
 
-# 2. the frontend
 ```
 
 The backend sends the frontend out as well, so the whole app is on
@@ -28,6 +36,7 @@ The backend sends the frontend out as well, so the whole app is on
 To work on the frontend with a live reload, serve it yourself as well:
 
 ```bash
+cd frontend
 python3 -m http.server 5500   # then open http://localhost:5500
 ```
 
@@ -70,12 +79,15 @@ server, so an admin can wipe the demo data with the "reset demo" button.
 ## How the frontend is put together
 
 ```
-index.html      the page, with the three areas
-style.css       how it looks
-api.js          the only file that talks to the server
-main.js         the server data, the sign in, the navigation, the rules of the three areas
-student.js      the student portal
-staff.js        the worker application and the admin dashboard
+frontend/
+  index.html      the page, with the three areas
+  css/style.css   how it looks
+  assets/logo.png the university logo
+  js/
+    api.js        the only file that talks to the server
+    main.js       the server data, the sign in, the navigation, the rules of the three areas
+    student.js    the student portal
+    staff.js      the worker application and the admin dashboard
 ```
 
 `api.js` is the one place that calls the server. It sends the token of the signed in role
@@ -103,7 +115,8 @@ The server keeps them, not the browser:
 ## The backend
 
 Read [`backend/README.md`](backend/README.md) for the API and
-[`backend/database/DATABASE.md`](backend/database/DATABASE.md) for the database.
+[`docs/DATABASE.md`](docs/DATABASE.md) for the database. The frontend guide is
+[`docs/FOR_FRONTEND.md`](docs/FOR_FRONTEND.md).
 
 The tests of the backend:
 

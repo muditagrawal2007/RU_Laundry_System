@@ -1,7 +1,7 @@
 # How the frontend talks to this backend
 
 This is the short version for whoever is building the frontend. The full list of endpoints is in
-[`README.md`](README.md).
+[`README.md`](../backend/README.md).
 
 ## 1. The address
 
@@ -67,7 +67,7 @@ To sign out: `POST /api/auth/logout`.
 
 ## 3. A small fetch helper
 
-Put this in `src/lib/api.ts` and build every call on it:
+A helper like this (the real one is `frontend/js/api.js`) is the base of every call:
 
 ```ts
 const API_URL = "http://localhost:4000/api";
@@ -92,7 +92,7 @@ async function request(method: string, path: string, role?: "STUDENT" | "WORKER"
 }
 ```
 
-Then each function in `api.ts` becomes one line. For example, `getStudentDashboard`:
+Then each function in `api.js` becomes one line. For example, `getStudentDashboard`:
 
 ```ts
 // before: the answer came from fake-db.ts
@@ -116,7 +116,7 @@ nothing:
 | `getStudentComplaints(studentId, filters)` | `getStudentComplaints(filters)` |
 | `getAllComplaints(filters)` (admin) | `getAllComplaints(filters)` |
 
-The screens themselves do not need to change. Only `api.ts` does.
+The screens themselves do not need to change. Only `api.js` does.
 
 ## 4. Errors
 
@@ -159,7 +159,7 @@ const { dataUrl: photo } = await getStudentPhoto(photoId);
 
 ## 6. The endpoints, area by area
 
-The full table with the body of each call is in [`README.md`](README.md). The short version:
+The full table with the body of each call is in [`README.md`](../backend/README.md). The short version:
 
 ### Auth
 | Method | Path | Body |
