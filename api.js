@@ -407,6 +407,9 @@ async function loadAdminData() {
   const settings = await call("GET", "/admin/settings");
   data.settings.urgentEnabled = settings.urgentEnabled;
 
+  const workers = await call("GET", "/admin/workers");
+  data.workers = workers.map(function (w) { return { id: w.id, name: w.name }; });
+
   return data;
 }
 

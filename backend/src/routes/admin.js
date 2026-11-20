@@ -454,6 +454,11 @@ router.get("/students/:studentId", async (req, res) => {
   });
 });
 
+router.get("/workers", async (req, res) => {
+  const workers = await query("SELECT id, name FROM users WHERE role = 'WORKER' ORDER BY id");
+  res.json(workers);
+});
+
 /* ------------------------------------------------------------------------ */
 /* Complaints                                                                */
 /* ------------------------------------------------------------------------ */
