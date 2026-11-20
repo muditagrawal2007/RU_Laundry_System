@@ -9,7 +9,7 @@
 // history line for each of them.
 
 import { query } from "./db.js";
-import { logActivity, notifyStudent } from "./activity.js";
+import { logActivity, notifyStudent, SYSTEM } from "./activity.js";
 
 export async function expireOldRequests() {
   // 1. Give Clothes codes that were never verified.
@@ -19,16 +19,10 @@ export async function expireOldRequests() {
      RETURNING *`,
   );
   for (const request of expiredGives) {
-    await logActivity({
+    await logActivity(SYSTEM, request, {
       action: "Submission QR expired",
-      actorName: "System",
-      actorRole: "SYSTEM",
-      studentId: request.studentId,
-      studentName: request.studentName,
-      bagNumber: request.bagNumber,
       result: "QR expired",
       kind: "GIVE",
-      refType: "give",
       refId: request.id,
     });
     await notifyStudent(
@@ -52,16 +46,10 @@ export async function expireOldRequests() {
      RETURNING *`,
   );
   for (const request of expiredTakes) {
-    await logActivity({
+    await logActivity(SYSTEM, request, {
       action: "Collection session expired",
-      actorName: "System",
-      actorRole: "SYSTEM",
-      studentId: request.studentId,
-      studentName: request.studentName,
-      bagNumber: request.bagNumber,
       result: "Session expired",
       kind: "TAKE",
-      refType: "take",
       refId: request.id,
     });
     await notifyStudent(

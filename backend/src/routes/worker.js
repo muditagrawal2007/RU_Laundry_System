@@ -24,7 +24,7 @@
 // workers press the same button at the same moment, only the first one works.
 
 import express from "express";
-import { query, queryOne } from "../db.js";
+import { query, queryOne, count } from "../db.js";
 import { requireRole } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { getCounterInfo } from "../counter.js";
@@ -66,8 +66,8 @@ function daysFor(service) {
 /* ------------------------------------------------------------------------ */
 
 router.get("/dashboard", async (req, res) => {
-  const gives = await queryOne("SELECT COUNT(*) AS count FROM give_requests WHERE status = 'PENDING'");
-  const takes = await queryOne(
+  const pendingGiveCount = await count("SELECT COUNT(*) AS count FROM give_requests WHERE status = 'PENDING'");
+  const pendingTakeCount = await count(
     "SELECT COUNT(*) AS count FROM take_requests WHERE status IN ('SCANNED', 'VERIFIED')",
   );
   const recentHandovers = await query(
@@ -78,8 +78,8 @@ router.get("/dashboard", async (req, res) => {
 
   res.json({
     worker: { name: req.user.name, workerId: req.user.id },
-    pendingGiveCount: Number(gives.count),
-    pendingTakeCount: Number(takes.count),
+    pendingGiveCount,
+    pendingTakeCount,
     recentHandovers: recentHandovers,
     counter: await getCounterInfo(),
   });
@@ -195,19 +195,13 @@ router.post("/give-requests/:id/verify", async (req, res) => {
     ],
   );
 
-  await logActivity({
+  await logActivity(worker, request, {
     action: "Bag received by worker",
-    actorName: worker.name,
-    actorRole: "WORKER",
-    studentId: request.studentId,
-    studentName: request.studentName,
-    bagNumber: request.bagNumber,
-    fromStatus: "NOT_GIVEN",
-    toStatus: "IN_PROCESS",
     result: "Bag received",
     kind: "GIVE",
-    refType: "give",
     refId: request.id,
+    fromStatus: "NOT_GIVEN",
+    toStatus: "IN_PROCESS",
   });
   await notifyStudent(
     request.studentId,
@@ -242,17 +236,12 @@ router.post("/give-requests/:id/return-to-counter", async (req, res) => {
   );
   if (!updated) throw new ApiError(409, "This bag is not in process.");
 
-  await logActivity({
+  await logActivity(worker, bag, {
     action: "Bag returned to counter",
-    actorName: worker.name,
-    actorRole: "WORKER",
-    studentId: bag.studentId,
-    studentName: bag.studentName,
-    bagNumber: bag.bagNumber,
-    fromStatus: "IN_PROCESS",
-    toStatus: "AT_COUNTER",
     result: "Ready for collection",
     kind: "BAG",
+    fromStatus: "IN_PROCESS",
+    toStatus: "AT_COUNTER",
   });
   await notifyStudent(
     bag.studentId,
@@ -282,13 +271,8 @@ router.post("/bags/:bagNumber/progress", async (req, res) => {
     [progress, worker.name, bag.bagNumber],
   );
 
-  await logActivity({
+  await logActivity(worker, bag, {
     action: "Progress: " + progress,
-    actorName: worker.name,
-    actorRole: "WORKER",
-    studentId: bag.studentId,
-    studentName: bag.studentName,
-    bagNumber: bag.bagNumber,
     result: progress,
     kind: "BAG",
   });
@@ -319,16 +303,10 @@ router.post("/take-requests/:id/scan", async (req, res) => {
   );
   if (!request) throw new ApiError(409, "This collection request has already been handled.");
 
-  await logActivity({
+  await logActivity(worker, request, {
     action: "Collection QR scanned",
-    actorName: worker.name,
-    actorRole: "WORKER",
-    studentId: request.studentId,
-    studentName: request.studentName,
-    bagNumber: request.bagNumber,
     result: "Waiting for student verification",
     kind: "TAKE",
-    refType: "take",
     refId: request.id,
   });
   await notifyStudent(
@@ -362,19 +340,13 @@ router.post("/take-requests/:id/handover", async (req, res) => {
     [worker.name, request.bagNumber],
   );
 
-  await logActivity({
+  await logActivity(worker, request, {
     action: "Clothes collected successfully",
-    actorName: worker.name,
-    actorRole: "WORKER",
-    studentId: request.studentId,
-    studentName: request.studentName,
-    bagNumber: request.bagNumber,
-    fromStatus: "AT_COUNTER",
-    toStatus: "NOT_GIVEN",
     result: "Collected",
     kind: "TAKE",
-    refType: "take",
     refId: request.id,
+    fromStatus: "AT_COUNTER",
+    toStatus: "NOT_GIVEN",
   });
   await notifyStudent(
     request.studentId,
@@ -415,18 +387,13 @@ router.post("/manual-handover", async (req, res) => {
     [bag.studentId],
   );
 
-  await logActivity({
+  await logActivity(worker, bag, {
     action: "Manual handover completed",
-    actorName: worker.name,
-    actorRole: "WORKER",
-    studentId: bag.studentId,
-    studentName: bag.studentName,
-    bagNumber: bag.bagNumber,
-    fromStatus: bag.status,
-    toStatus: "NOT_GIVEN",
-    reason: reason,
     result: "Manual handover recorded",
     kind: "BAG",
+    fromStatus: bag.status,
+    toStatus: "NOT_GIVEN",
+    reason,
   });
   await notifyStudent(
     bag.studentId,
@@ -468,18 +435,13 @@ router.post("/status-corrections", async (req, res) => {
     [bag.studentId],
   );
 
-  await logActivity({
+  await logActivity(worker, bag, {
     action: "Status correction recorded",
-    actorName: worker.name,
-    actorRole: "WORKER",
-    studentId: bag.studentId,
-    studentName: bag.studentName,
-    bagNumber: bag.bagNumber,
-    fromStatus: bag.status,
-    toStatus: toStatus,
-    reason: reason,
     result: "Correction recorded",
     kind: "BAG",
+    fromStatus: bag.status,
+    toStatus,
+    reason,
   });
 
   res.json(await findBagByNumber(bag.bagNumber));

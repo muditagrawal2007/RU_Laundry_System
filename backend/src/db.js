@@ -38,6 +38,12 @@ export async function queryOne(sql, params = []) {
   return rows.length > 0 ? rows[0] : null;
 }
 
+/** Runs "SELECT COUNT(*) ..." and returns the number (pg sends COUNT as text). */
+export async function count(sql, params = []) {
+  const row = await queryOne(sql, params);
+  return Number(row.count);
+}
+
 /** Runs a whole .sql file with many statements (used to create the tables). */
 export async function runSqlScript(sql) {
   await pool.query(sql);

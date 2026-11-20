@@ -34,12 +34,12 @@
 
 import express from "express";
 import bcrypt from "bcryptjs";
-import { query, queryOne } from "../db.js";
+import { query, queryOne, count } from "../db.js";
 import { requireRole } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { getCounter } from "../counter.js";
 import { findBagOfStudent, findBagByNumber, getAllBags } from "../bags.js";
-import { logActivity, notifyStudent, notifyAllStudents } from "../activity.js";
+import { logActivity, notifyStudent, notifyAllStudents, NO_STUDENT } from "../activity.js";
 import { giveRows, takeRows } from "../history.js";
 import { addUpdates, findComplaint, COMPLAINT_STATUSES } from "../complaints.js";
 import { bySearch, byValue, byDate, byDateOrder } from "../filters.js";
@@ -65,24 +65,24 @@ router.get("/dashboard", async (req, res) => {
   const bagCounts = { NOT_GIVEN: 0, IN_PROCESS: 0, AT_COUNTER: 0 };
   for (const bag of bags) bagCounts[bag.status] += 1;
 
-  const gives = await queryOne("SELECT COUNT(*) AS count FROM give_requests WHERE status = 'PENDING'");
-  const takes = await queryOne(
+  const pendingGiveCount = await count("SELECT COUNT(*) AS count FROM give_requests WHERE status = 'PENDING'");
+  const pendingTakeCount = await count(
     "SELECT COUNT(*) AS count FROM take_requests WHERE status IN ('SCANNED', 'VERIFIED')",
   );
-  const handovers = await queryOne(
+  const recentHandoverCount = await count(
     "SELECT COUNT(*) AS count FROM activity WHERE action = 'Clothes collected successfully'",
   );
-  const complaints = await queryOne("SELECT COUNT(*) AS count FROM complaints WHERE status <> 'RESOLVED'");
+  const openComplaintCount = await count("SELECT COUNT(*) AS count FROM complaints WHERE status <> 'RESOLVED'");
   const recentActivity = await query("SELECT * FROM activity ORDER BY at DESC LIMIT 12");
 
   res.json({
     adminName: req.user.name,
     counter: counter,
     bagCounts: bagCounts,
-    pendingGiveCount: Number(gives.count),
-    pendingTakeCount: Number(takes.count),
-    recentHandoverCount: Number(handovers.count),
-    openComplaintCount: Number(complaints.count),
+    pendingGiveCount,
+    pendingTakeCount,
+    recentHandoverCount,
+    openComplaintCount,
     recentActivity: recentActivity,
   });
 });
@@ -97,13 +97,8 @@ router.post("/counter/open", async (req, res) => {
     "UPDATE counter_state SET manual_state = 'OPEN', opened_at = now(), closed_at = NULL, updated_by = $1 WHERE id = 1",
     [admin.name],
   );
-  await logActivity({
+  await logActivity(admin, NO_STUDENT, {
     action: "Counter opened",
-    actorName: admin.name,
-    actorRole: "ADMIN",
-    studentId: "-",
-    studentName: "-",
-    bagNumber: "-",
     result: "Laundry counter is now OPEN.",
     kind: "COUNTER",
   });
@@ -121,13 +116,8 @@ router.post("/counter/close", async (req, res) => {
     "UPDATE counter_state SET manual_state = 'CLOSED', closed_at = now(), updated_by = $1 WHERE id = 1",
     [admin.name],
   );
-  await logActivity({
+  await logActivity(admin, NO_STUDENT, {
     action: "Counter closed",
-    actorName: admin.name,
-    actorRole: "ADMIN",
-    studentId: "-",
-    studentName: "-",
-    bagNumber: "-",
     result: "Laundry counter is now CLOSED.",
     kind: "COUNTER",
   });
@@ -143,13 +133,8 @@ router.post("/counter/close", async (req, res) => {
 router.post("/counter/auto", async (req, res) => {
   const admin = req.user;
   await query("UPDATE counter_state SET manual_state = NULL, updated_by = $1 WHERE id = 1", [admin.name]);
-  await logActivity({
+  await logActivity(admin, NO_STUDENT, {
     action: "Counter set to follow the schedule",
-    actorName: admin.name,
-    actorRole: "ADMIN",
-    studentId: "-",
-    studentName: "-",
-    bagNumber: "-",
     result: "The weekly schedule decides when the counter is open.",
     kind: "COUNTER",
   });
@@ -174,13 +159,8 @@ router.put("/settings", async (req, res) => {
      ON CONFLICT (id) DO UPDATE SET urgent_enabled = $1`,
     [urgentEnabled],
   );
-  await logActivity({
+  await logActivity(req.user, NO_STUDENT, {
     action: "One-Day Urgent service turned " + (urgentEnabled ? "on" : "off"),
-    actorName: req.user.name,
-    actorRole: "ADMIN",
-    studentId: "-",
-    studentName: "-",
-    bagNumber: "-",
     result: urgentEnabled ? "ON" : "OFF",
     kind: "COUNTER",
   });
@@ -316,13 +296,8 @@ router.post("/assignments", async (req, res) => {
     admin.name,
   ]);
 
-  await logActivity({
+  await logActivity(admin, { studentId: student.id, studentName: student.name, bagNumber }, {
     action: "Bag assigned to student",
-    actorName: admin.name,
-    actorRole: "ADMIN",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: bagNumber,
     result: "Assignment created",
     kind: "BAG",
   });
@@ -540,16 +515,10 @@ router.patch("/complaints/:ref", async (req, res) => {
     );
   }
 
-  await logActivity({
+  await logActivity(admin, complaint, {
     action: resolution ? "Complaint resolved" : "Complaint updated",
-    actorName: admin.name,
-    actorRole: "ADMIN",
-    studentId: complaint.studentId,
-    studentName: complaint.studentName,
-    bagNumber: complaint.bagNumber,
     result: status,
     kind: "COMPLAINT",
-    refType: "complaint",
     refId: complaint.ref,
   });
 

@@ -26,7 +26,7 @@
 // GET  /api/student/profile
 
 import express from "express";
-import { query, queryOne } from "../db.js";
+import { query, queryOne, count } from "../db.js";
 import { requireRole } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { getCounterInfo } from "../counter.js";
@@ -46,9 +46,21 @@ const router = express.Router();
 router.use(requireRole("STUDENT"));
 
 /** The service the student picked. "ironing" means ironing only, no washing. */
-function readService(service, ironing) {
+function readService(service) {
   if (service === "urgent" || service === "ironing") return service;
   return "regular";
+}
+
+const TABLES = { give: "give_requests", take: "take_requests" };
+
+/** One request of the signed in student (404 when it is not theirs). */
+async function findOwnRequest(kind, id, student) {
+  const request = await queryOne(
+    `SELECT * FROM ${TABLES[kind]} WHERE id = $1 AND student_id = $2`,
+    [id, student.id],
+  );
+  if (!request) throw new ApiError(404, "Request not found.");
+  return request;
 }
 
 /** Is the one-day urgent service switched on? */
@@ -129,7 +141,7 @@ router.post("/give-requests", async (req, res) => {
   if (photoDataUrl) photoId = await savePhoto(student.id, "REFERENCE", photoDataUrl);
 
   // Which service the student picked.
-  const service = readService(req.body.service, req.body.ironing);
+  const service = readService(req.body.service);
   if (service === "urgent" && !(await urgentIsOn())) {
     throw new ApiError(409, "The one-day urgent service is switched off right now.");
   }
@@ -153,16 +165,10 @@ router.post("/give-requests", async (req, res) => {
     ],
   );
 
-  await logActivity({
+  await logActivity(student, bag, {
     action: "Give Clothes request created",
-    actorName: student.name,
-    actorRole: "STUDENT",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: bag.bagNumber,
     result: "Waiting for worker verification",
     kind: "GIVE",
-    refType: "give",
     refId: request.id,
   });
 
@@ -170,21 +176,13 @@ router.post("/give-requests", async (req, res) => {
 });
 
 router.get("/give-requests/:id", async (req, res) => {
-  const request = await queryOne(
-    "SELECT * FROM give_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, req.user.id],
-  );
-  if (!request) throw new ApiError(404, "Request not found.");
+  const request = await findOwnRequest("give", req.params.id, req.user);
   res.json(request);
 });
 
 // Shows the QR code again (for example after a page refresh). Writes nothing.
 router.get("/give-requests/:id/qr", async (req, res) => {
-  const request = await queryOne(
-    "SELECT * FROM give_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, req.user.id],
-  );
-  if (!request) throw new ApiError(404, "Request not found.");
+  const request = await findOwnRequest("give", req.params.id, req.user);
   if (request.status !== "PENDING") throw new ApiError(409, "This request is no longer waiting.");
   res.json(qrAnswer("give", request));
 });
@@ -192,11 +190,7 @@ router.get("/give-requests/:id/qr", async (req, res) => {
 // Makes a new QR code when the old one expired.
 router.post("/give-requests/:id/qr/renew", async (req, res) => {
   const student = req.user;
-  const old = await queryOne(
-    "SELECT * FROM give_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, student.id],
-  );
-  if (!old) throw new ApiError(404, "Request not found.");
+  const old = await findOwnRequest("give", req.params.id, req.user);
   if (old.status === "RECEIVED") throw new ApiError(409, "This request is already complete.");
 
   const bag = await findBagOfStudent(student.id);
@@ -212,16 +206,10 @@ router.post("/give-requests/:id/qr/renew", async (req, res) => {
     [minutesFromNow(GIVE_QR_MINUTES), old.id],
   );
 
-  await logActivity({
+  await logActivity(student, request, {
     action: "New QR code generated",
-    actorName: student.name,
-    actorRole: "STUDENT",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: request.bagNumber,
     result: "QR renewed",
     kind: "GIVE",
-    refType: "give",
     refId: request.id,
   });
 
@@ -271,16 +259,10 @@ router.post("/take-requests", async (req, res) => {
     ],
   );
 
-  await logActivity({
+  await logActivity(student, bag, {
     action: "Collection request created",
-    actorName: student.name,
-    actorRole: "STUDENT",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: bag.bagNumber,
     result: "Waiting for worker scan",
     kind: "TAKE",
-    refType: "take",
     refId: request.id,
   });
 
@@ -288,89 +270,41 @@ router.post("/take-requests", async (req, res) => {
 });
 
 router.get("/take-requests/:id", async (req, res) => {
-  const request = await queryOne(
-    "SELECT * FROM take_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, req.user.id],
-  );
-  if (!request) throw new ApiError(404, "Request not found.");
+  const request = await findOwnRequest("take", req.params.id, req.user);
   res.json(request);
 });
 
 router.get("/take-requests/:id/qr", async (req, res) => {
-  const request = await queryOne(
-    "SELECT * FROM take_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, req.user.id],
-  );
-  if (!request) throw new ApiError(404, "Request not found.");
+  const request = await findOwnRequest("take", req.params.id, req.user);
   if (request.status !== "PENDING") throw new ApiError(409, "This request is no longer waiting.");
   res.json(qrAnswer("take", request));
 });
 
 // The student cancels a request that nobody has looked at yet.
 // Once the worker has scanned the code it is too late to cancel.
-router.post("/take-requests/:id/cancel", async (req, res) => {
-  const student = req.user;
-  const request = await queryOne(
-    "SELECT * FROM take_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, student.id],
-  );
-  if (!request) throw new ApiError(404, "Request not found.");
-  if (request.status !== "PENDING") {
-    throw new ApiError(409, "This request can no longer be cancelled.");
-  }
+for (const kind of ["give", "take"]) {
+  router.post(`/${kind}-requests/:id/cancel`, async (req, res) => {
+    const student = req.user;
+    const request = await findOwnRequest(kind, req.params.id, student);
+    if (request.status !== "PENDING") {
+      throw new ApiError(409, "This request can no longer be cancelled.");
+    }
 
-  const updated = await queryOne(
-    "UPDATE take_requests SET status = 'CANCELLED', seen = true WHERE id = $1 RETURNING *",
-    [request.id],
-  );
+    const updated = await queryOne(
+      `UPDATE ${TABLES[kind]} SET status = 'CANCELLED', seen = true WHERE id = $1 RETURNING *`,
+      [request.id],
+    );
 
-  await logActivity({
-    action: "Request cancelled by the student",
-    actorName: student.name,
-    actorRole: "STUDENT",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: request.bagNumber,
-    result: "Cancelled",
-    kind: "TAKE",
-    refType: "take",
-    refId: request.id,
+    await logActivity(student, request, {
+      action: "Request cancelled by the student",
+      result: "Cancelled",
+      kind: kind.toUpperCase(),
+      refId: request.id,
+    });
+
+    res.json(updated);
   });
-
-  res.json(updated);
-});
-
-router.post("/give-requests/:id/cancel", async (req, res) => {
-  const student = req.user;
-  const request = await queryOne(
-    "SELECT * FROM give_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, student.id],
-  );
-  if (!request) throw new ApiError(404, "Request not found.");
-  if (request.status !== "PENDING") {
-    throw new ApiError(409, "This request can no longer be cancelled.");
-  }
-
-  const updated = await queryOne(
-    "UPDATE give_requests SET status = 'CANCELLED', seen = true WHERE id = $1 RETURNING *",
-    [request.id],
-  );
-
-  await logActivity({
-    action: "Request cancelled by the student",
-    actorName: student.name,
-    actorRole: "STUDENT",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: request.bagNumber,
-    result: "Cancelled",
-    kind: "GIVE",
-    refType: "give",
-    refId: request.id,
-  });
-
-  res.json(updated);
-});
+}
 
 // The student has seen the results of their finished requests.
 router.post("/acknowledge", async (req, res) => {
@@ -392,11 +326,7 @@ router.post("/acknowledge", async (req, res) => {
 // This is NOT the handover: the worker still has to give the bag back.
 router.post("/take-requests/:id/verify", async (req, res) => {
   const student = req.user;
-  const request = await queryOne(
-    "SELECT * FROM take_requests WHERE id = $1 AND student_id = $2",
-    [req.params.id, student.id],
-  );
-  if (!request) throw new ApiError(404, "Request not found.");
+  const request = await findOwnRequest("take", req.params.id, req.user);
   if (request.status === "EXPIRED") {
     throw new ApiError(409, "Your collection session has expired. Generate a new QR code to continue.");
   }
@@ -411,16 +341,10 @@ router.post("/take-requests/:id/verify", async (req, res) => {
     [request.id],
   );
 
-  await logActivity({
+  await logActivity(student, request, {
     action: "Student verification completed",
-    actorName: student.name,
-    actorRole: "STUDENT",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: request.bagNumber,
     result: "Waiting for worker handover",
     kind: "TAKE",
-    refType: "take",
     refId: request.id,
   });
 
@@ -530,16 +454,10 @@ router.post("/complaints", async (req, res) => {
       transactionLabel || null, evidenceId, category, description],
   );
 
-  await logActivity({
+  await logActivity(student, bag, {
     action: "Complaint submitted",
-    actorName: student.name,
-    actorRole: "STUDENT",
-    studentId: student.id,
-    studentName: student.name,
-    bagNumber: bag.bagNumber,
     result: CATEGORY_LABELS[category],
     kind: "COMPLAINT",
-    refType: "complaint",
     refId: ref,
   });
 
@@ -601,20 +519,15 @@ router.get("/profile", async (req, res) => {
   const student = req.user;
   const bag = await findBagOfStudent(student.id);
 
-  const gives = await queryOne("SELECT COUNT(*) AS count FROM give_requests WHERE student_id = $1", [student.id]);
-  const takes = await queryOne("SELECT COUNT(*) AS count FROM take_requests WHERE student_id = $1", [student.id]);
-  const complaints = await queryOne("SELECT COUNT(*) AS count FROM complaints WHERE student_id = $1", [student.id]);
-
   res.json({
     name: student.name,
     studentId: student.id,
     bagNumber: bag ? bag.bagNumber : "-",
     bagStatus: bag ? bag.status : "NOT_GIVEN",
     stats: {
-      // COUNT(*) comes back as text, so turn it into a number.
-      giveCount: Number(gives.count),
-      takeCount: Number(takes.count),
-      complaintCount: Number(complaints.count),
+      giveCount: await count("SELECT COUNT(*) AS count FROM give_requests WHERE student_id = $1", [student.id]),
+      takeCount: await count("SELECT COUNT(*) AS count FROM take_requests WHERE student_id = $1", [student.id]),
+      complaintCount: await count("SELECT COUNT(*) AS count FROM complaints WHERE student_id = $1", [student.id]),
     },
   });
 });
