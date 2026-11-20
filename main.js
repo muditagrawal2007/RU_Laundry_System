@@ -345,7 +345,6 @@ async function showPage(pageId, param) {
 }
  
 function renderCurrent() {
-  lastSig = "";
   const fn = renderers[currentPage];
   if (fn) fn(currentParam);
   updateBell();
@@ -475,8 +474,10 @@ async function tick() {
     if (sig !== lastSig) {
       const el = document.activeElement;
       const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
-      if (!typing) renderCurrent();   // do not wipe what someone is typing
-      lastSig = sig;
+      if (!typing) {
+        renderCurrent();   // do not wipe what someone is typing
+        lastSig = sig;
+      }
     }
     updateCountdowns();
     updateBell();
