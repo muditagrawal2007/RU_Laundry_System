@@ -645,7 +645,7 @@ function renderBagDetail() {
  
 function renderAdminStudents() {
   if (currentRole() !== "admin") return;
-  const free = db.bags.filter(function (b) { return !b.studentId; });
+  const free = db.availableBags || [];
   let html = '<h1 class="page-title">Students and Bags</h1><p class="page-sub">Each student has one permanent bag. Students cannot change it themselves.</p>';
   html += tableHTML(["Student ID", "Student", "Assigned bag", "Bag status"], db.students.map(function (s) {
     const bag = bagOfStudent(s.id);
@@ -655,30 +655,29 @@ function renderAdminStudents() {
   html += '<div class="card"><h3>Add a student and assign a bag</h3>';
   if (studentMsg) html += '<p class="' + (studentMsg.indexOf("added") !== -1 ? "" : "error") + '">' + esc(studentMsg) + "</p>";
   if (free.length === 0) {
-    html += '<p class="muted">All bags are assigned. No free bag is available.</p>';
+    html += '<p class="muted">There is no free bag number to assign right now.</p>';
   } else {
     html += '<div class="grid-2"><div><label for="newId">Student ID</label><input id="newId" class="input" placeholder="RU2026CS004"></div>' +
       '<div><label for="newName">Student name</label><input id="newName" class="input" placeholder="Full name"></div>' +
       '<div><label for="newPass">Starting password</label><input id="newPass" class="input" placeholder="ru@2026"></div>' +
-      '<div><label for="newBag">Available bag</label><select id="newBag">' + free.map(function (b) { return "<option>" + b.number + "</option>"; }).join("") + "</select></div></div>" +
+      '<div><label for="newBag">Available bag</label><select id="newBag">' + free.map(function (b) { return "<option>" + esc(b) + "</option>"; }).join("") + "</select></div></div>" +
       '<div class="actions"><button class="btn" data-act="add-student">Confirm Assignment</button></div>';
   }
   html += "</div>";
   $("page-a-students").innerHTML = html;
 }
  
-function addStudent() {
-  db = loadData();
+async function addStudent() {
+  db = await loadData();
   const id = $("newId").value.trim(), name = $("newName").value.trim(), pass = $("newPass").value.trim(), bagNo = $("newBag").value;
   if (!id || !name || !pass) { studentMsg = "Fill in the student ID, name and password."; renderAdminStudents(); return; }
   if (db.students.some(function (s) { return s.id.toLowerCase() === id.toLowerCase(); })) { studentMsg = "A student with this ID already exists."; renderAdminStudents(); return; }
-  const bag = db.bags.find(function (b) { return b.number === bagNo; });
-  if (!bag || bag.studentId) { studentMsg = "That bag is already assigned. Choose another bag."; renderAdminStudents(); return; }
- 
+  if (!bagNo || (db.availableBags || []).indexOf(bagNo) === -1) { studentMsg = "Choose one of the available bags."; renderAdminStudents(); return; }
+
   const a = currentUser();
-  api.addStudent(a.id, id, name, pass, bag.number).then(async function () {
+  api.addStudent(a.id, id, name, pass, bagNo).then(async function () {
     db = await loadData();
-    studentMsg = "Student added and bag " + bag.number + " assigned.";
+    studentMsg = "Student added and bag " + bagNo + " assigned.";
     renderCurrent();
   }).catch(function (err) {
     studentMsg = err && err.message ? err.message : "The student could not be added.";

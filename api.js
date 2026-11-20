@@ -410,6 +410,8 @@ async function loadAdminData() {
   const workers = await call("GET", "/admin/workers");
   data.workers = workers.map(function (w) { return { id: w.id, name: w.name }; });
 
+  data.availableBags = await call("GET", "/admin/available-bags");
+
   return data;
 }
 

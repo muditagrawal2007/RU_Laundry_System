@@ -66,7 +66,7 @@ const ICONS = {
 const renderers = {};     // every page registers its own render function here
 let db = {                // the data of the server, filled in by loadData()
   students: [], workers: [], admins: [], bags: [], transactions: [],
-  complaints: [], notifications: [], activity: [],
+  complaints: [], notifications: [], activity: [], availableBags: [],
   counterOpen: true, settings: { urgentEnabled: true }
 };
 let loginRole = "student";
