@@ -8,7 +8,8 @@
 # https://neon.com (it does not expire, unlike the free Render Postgres,
 # which is thrown away 30 days after it is made).
 #
-# The demo data is loaded right after the first deploy (the initialDeployHook).
+# The tables and the demo data are created by the server itself on its first
+# start, when it finds the database empty.
 
 services:
   - type: web
@@ -20,7 +21,6 @@ services:
     startCommand: cd backend && npm start
     healthCheckPath: /api/health
     autoDeployTrigger: commit
-    initialDeployHook: cd backend && npm run db:setup || echo "The database was not seeded. Run 'npm run db:setup' with the DATABASE_URL of the database."
     envVars:
       - key: NODE_VERSION
         value: "22"

@@ -55,8 +55,9 @@ The page and the API are one service, so the hosted app gets one address.
    "New" -> "Blueprint", choose this repository and apply it. Render asks for
    the `DATABASE_URL` (the connection string from step 1) and fills in the rest
    itself: the QR secret, the Node version and the region.
-3. **The data.** The first deploy loads the demo data by itself. If that did
-   not work, do it by hand with the connection string:
+3. **The data.** The server creates the tables and loads the demo data by itself
+   the first time it starts on an empty database. A database that already has
+   tables is never touched. To wipe it and start again by hand:
    ```bash
    cd backend
    DATABASE_URL="<the connection string>" npm run db:setup
